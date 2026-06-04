@@ -26,7 +26,7 @@ export default function SendPulseAccounts() {
     queryFn: () => base44.entities.SendPulseAccount.list("-created_date"),
   });
 
-  const webhookUrl = `${window.location.origin}/api/functions/sendpulseWebhook`;
+  const webhookUrl = `https://joiodrhhvhxmushujxze.supabase.co/functions/v1/sendpulseWebhook`;
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
