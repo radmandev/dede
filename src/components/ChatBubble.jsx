@@ -89,7 +89,7 @@ export default function ChatBubble({ message }) {
           <MediaContent message={message} />
         </div>
         <p className={`text-[11px] text-muted-foreground mt-1 px-1 ${isInbound ? "text-left" : "text-right"}`}>
-          {format(new Date(message.sent_at || message.created_date), "h:mm a")}
+          {(() => { const d = new Date(message.sent_at || message.created_at); return isNaN(d) ? "" : format(d, "h:mm a"); })()}
         </p>
       </div>
     </div>
