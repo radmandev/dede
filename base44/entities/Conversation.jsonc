@@ -1,0 +1,82 @@
+{
+  "name": "Conversation",
+  "type": "object",
+  "properties": {
+    "open_channel_id": {
+      "type": "string",
+      "title": "Bitrix24 Open Channel ID"
+    },
+    "sendpulse_account_id": {
+      "type": "string",
+      "title": "SendPulse Account ID"
+    },
+    "bitrix24_account_id": {
+      "type": "string",
+      "title": "Bitrix24 Account ID"
+    },
+    "sendpulse_conversation_id": {
+      "type": "string",
+      "title": "SendPulse Conversation ID"
+    },
+    "sendpulse_bot_id": {
+      "type": "string",
+      "title": "Bot ID"
+    },
+    "sendpulse_contact_id": {
+      "type": "string",
+      "title": "Contact ID"
+    },
+    "contact_name": {
+      "type": "string",
+      "title": "Contact Name"
+    },
+    "contact_phone": {
+      "type": "string",
+      "title": "Contact Phone"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "whatsapp",
+        "instagram",
+        "facebook",
+        "live_chat"
+      ],
+      "title": "Channel"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "pending",
+        "closed"
+      ],
+      "title": "Status",
+      "default": "open"
+    },
+    "unread_count": {
+      "type": "number",
+      "title": "Unread Count",
+      "default": 0
+    },
+    "last_message_text": {
+      "type": "string",
+      "title": "Last Message"
+    },
+    "last_message_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Message At"
+    },
+    "bitrix24_chat_id": {
+      "type": "number",
+      "title": "Bitrix24 Chat ID"
+    }
+  },
+  "required": [
+    "sendpulse_conversation_id",
+    "contact_name",
+    "channel"
+  ]
+}

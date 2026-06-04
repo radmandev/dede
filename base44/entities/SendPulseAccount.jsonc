@@ -1,0 +1,40 @@
+{
+  "name": "SendPulseAccount",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Account Name"
+    },
+    "client_id": {
+      "type": "string",
+      "title": "SendPulse Client ID"
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "SendPulse Client Secret"
+    },
+    "access_token": {
+      "type": "string",
+      "title": "Access Token"
+    },
+    "token_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Token Expires At"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "error",
+        "not_configured"
+      ],
+      "title": "Status",
+      "default": "not_configured"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

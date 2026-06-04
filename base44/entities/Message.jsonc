@@ -1,0 +1,71 @@
+{
+  "name": "Message",
+  "type": "object",
+  "properties": {
+    "conversation_id": {
+      "type": "string",
+      "title": "Conversation ID"
+    },
+    "sendpulse_message_id": {
+      "type": "string",
+      "title": "SendPulse Message ID"
+    },
+    "sender_name": {
+      "type": "string",
+      "title": "Sender Name"
+    },
+    "message_text": {
+      "type": "string",
+      "title": "Message Text"
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "image",
+        "file",
+        "audio",
+        "template"
+      ],
+      "title": "Message Type",
+      "default": "text"
+    },
+    "media_url": {
+      "type": "string",
+      "title": "Media URL"
+    },
+    "media_name": {
+      "type": "string",
+      "title": "Media File Name"
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "inbound",
+        "outbound"
+      ],
+      "title": "Direction"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "whatsapp",
+        "instagram",
+        "facebook",
+        "live_chat"
+      ],
+      "title": "Channel"
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Original Send Time"
+    }
+  },
+  "required": [
+    "conversation_id",
+    "message_text",
+    "direction"
+  ]
+}

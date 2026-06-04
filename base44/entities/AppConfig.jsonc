@@ -1,0 +1,97 @@
+{
+  "name": "AppConfig",
+  "type": "object",
+  "properties": {
+    "sendpulse_client_id": {
+      "type": "string",
+      "title": "SendPulse Client ID"
+    },
+    "sendpulse_client_secret": {
+      "type": "string",
+      "title": "SendPulse Client Secret"
+    },
+    "sendpulse_access_token": {
+      "type": "string",
+      "title": "Access Token"
+    },
+    "token_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Token Expires At"
+    },
+    "connection_status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "error",
+        "not_configured"
+      ],
+      "title": "Connection Status",
+      "default": "not_configured"
+    },
+    "webhook_secret": {
+      "type": "string",
+      "title": "Webhook Secret"
+    },
+    "bitrix24_domain": {
+      "type": "string",
+      "title": "Bitrix24 Domain"
+    },
+    "bitrix24_access_token": {
+      "type": "string",
+      "title": "Bitrix24 Access Token"
+    },
+    "bitrix24_refresh_token": {
+      "type": "string",
+      "title": "Bitrix24 Refresh Token"
+    },
+    "bitrix24_token_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Bitrix24 Token Expires At"
+    },
+    "bitrix24_member_id": {
+      "type": "string",
+      "title": "Bitrix24 Member ID"
+    },
+    "bitrix24_app_client_id": {
+      "type": "string",
+      "title": "Bitrix24 App Client ID"
+    },
+    "bitrix24_app_client_secret": {
+      "type": "string",
+      "title": "Bitrix24 App Client Secret"
+    },
+    "bitrix24_line_id": {
+      "type": "string",
+      "title": "Bitrix24 Open Line ID"
+    },
+    "bitrix24_connector_id": {
+      "type": "string",
+      "title": "Bitrix24 Connector ID"
+    },
+    "bitrix24_status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "error",
+        "not_configured"
+      ],
+      "title": "Bitrix24 Status",
+      "default": "not_configured"
+    },
+    "app_installer_url": {
+      "type": "string",
+      "title": "App Installer URL (public)"
+    },
+    "app_handler_url": {
+      "type": "string",
+      "title": "App Handler URL (public)"
+    },
+    "app_base_url": {
+      "type": "string",
+      "title": "App Base URL (public origin)"
+    }
+  },
+  "required": []
+}

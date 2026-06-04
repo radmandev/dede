@@ -1,0 +1,19 @@
+{
+  "name": "GlobalConfig",
+  "type": "object",
+  "properties": {
+    "app_base_url": {
+      "type": "string",
+      "title": "App Production URL"
+    },
+    "bitrix24_app_client_id": {
+      "type": "string",
+      "title": "Bitrix24 Marketplace App Client ID"
+    },
+    "bitrix24_app_client_secret": {
+      "type": "string",
+      "title": "Bitrix24 Marketplace App Client Secret"
+    }
+  },
+  "required": []
+}

@@ -1,0 +1,57 @@
+{
+  "name": "Bitrix24OpenChannel",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Channel Name"
+    },
+    "bitrix24_account_id": {
+      "type": "string",
+      "title": "Bitrix24 Account ID"
+    },
+    "sendpulse_account_id": {
+      "type": "string",
+      "title": "SendPulse Account ID"
+    },
+    "bitrix24_line_id": {
+      "type": "string",
+      "title": "Bitrix24 Open Line ID"
+    },
+    "bitrix24_connector_id": {
+      "type": "string",
+      "title": "Bitrix24 Connector ID",
+      "default": "whatsapp_sendpulse"
+    },
+    "sendpulse_bot_id": {
+      "type": "string",
+      "title": "SendPulse Bot ID (inbound routing key)"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "whatsapp",
+        "instagram",
+        "facebook",
+        "live_chat"
+      ],
+      "title": "Channel",
+      "default": "whatsapp"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "title": "Status",
+      "default": "active"
+    }
+  },
+  "required": [
+    "name",
+    "bitrix24_account_id",
+    "sendpulse_account_id"
+  ]
+}

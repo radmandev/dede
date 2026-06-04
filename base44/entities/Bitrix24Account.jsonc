@@ -1,0 +1,57 @@
+{
+  "name": "Bitrix24Account",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Account Name"
+    },
+    "domain": {
+      "type": "string",
+      "title": "Bitrix24 Server Endpoint"
+    },
+    "member_id": {
+      "type": "string",
+      "title": "Bitrix24 Member ID"
+    },
+    "access_token": {
+      "type": "string",
+      "title": "Access Token"
+    },
+    "refresh_token": {
+      "type": "string",
+      "title": "Refresh Token"
+    },
+    "token_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Token Expires At"
+    },
+    "app_client_id": {
+      "type": "string",
+      "title": "App Client ID"
+    },
+    "app_client_secret": {
+      "type": "string",
+      "title": "App Client Secret"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "error",
+        "not_configured"
+      ],
+      "title": "Status",
+      "default": "not_configured"
+    },
+    "_last_poll_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Poll At (internal lock)"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

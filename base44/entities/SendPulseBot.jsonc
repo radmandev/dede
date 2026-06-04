@@ -1,0 +1,38 @@
+{
+  "name": "SendPulseBot",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Bot Name"
+    },
+    "sendpulse_account_id": {
+      "type": "string",
+      "title": "SendPulse Account ID"
+    },
+    "bot_id": {
+      "type": "string",
+      "title": "SendPulse Bot ID"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "telegram",
+        "whatsapp",
+        "instagram",
+        "facebook",
+        "live_chat"
+      ],
+      "title": "Channel"
+    },
+    "webhook_active": {
+      "type": "boolean",
+      "title": "Webhook Active",
+      "default": false
+    }
+  },
+  "required": [
+    "sendpulse_account_id",
+    "bot_id"
+  ]
+}
