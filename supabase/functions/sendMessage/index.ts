@@ -20,12 +20,19 @@ serve(async (req: Request) => {
     const text = rawText || message_text || ''
 
     // Persist outbound message
+    // Fetch conversation channel before inserting so we can store it on the message
+    let convChannel: string | null = null
+    if (conversation_id) {
+      const { data: convRow } = await supabase.from('conversations').select('channel').eq('id', conversation_id).limit(1).single()
+      convChannel = convRow?.channel || null
+    }
+
     const { data: inserted, error } = await supabase.from('messages').insert([{
       conversation_id: conversation_id || null,
       message_text: text || null,
       message_type: attachments?.length ? 'file' : 'text',
       direction: 'outbound',
-      channel: null,
+      channel: convChannel,
     }]).select().limit(1).single()
 
     if (error) {
@@ -37,15 +44,18 @@ serve(async (req: Request) => {
     try {
       let accountId = sendpulse_account_id
       let contactId = null
+      let channel = body?.channel || null
 
       if (conversation_id) {
         const { data: conv } = await supabase.from('conversations').select('*').eq('id', conversation_id).limit(1)
         if (conv?.[0]) {
           if (!accountId) accountId = conv[0].sendpulse_account_id
           contactId = conv[0].sendpulse_contact_id
+          if (!channel) channel = conv[0].channel
         }
       }
       if (!contactId && body?.contact_id) contactId = body.contact_id
+      channel = channel || 'live_chat'
 
       if (accountId && contactId) {
         const resolvedAttachments = []
@@ -61,10 +71,10 @@ serve(async (req: Request) => {
           } catch (e) { console.error('attachment upload failed', e) }
         }
         try {
-          await performSendPulseDelivery(supabase, accountId, body?.channel || 'live_chat', contactId, text, resolvedAttachments)
+          await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments)
         } catch (e) {
           console.error('delivery failed, enqueuing', e)
-          await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel: body?.channel || 'live_chat', text, attachments })
+          await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments })
         }
       }
     } catch (e) {
