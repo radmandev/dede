@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { callBitrix, ensureBitrixToken, parseNestedForm } from '../lib/bitrix24.ts'
@@ -41,6 +42,8 @@ async function resolveFileAttachments(endpoint: string, token: string, fileIds: 
 }
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     const bodyText = await req.text()
     let data: any

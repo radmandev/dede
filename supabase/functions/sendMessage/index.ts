@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { performSendPulseDelivery, enqueueDelivery } from '../lib/sendpulse.ts'
@@ -9,10 +10,13 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     if (req.method !== 'POST') return new Response('method not allowed', { status: 405 })
     const body = await req.json().catch(() => null)
-    const { conversation_id, text, attachments, sendpulse_account_id, sendpulse_bot_id } = body || {}
+    const { conversation_id, text: rawText, message_text, attachments, sendpulse_account_id, sendpulse_bot_id } = body || {}
+    const text = rawText || message_text || ''
 
     // Persist outbound message
     const { data: inserted, error } = await supabase.from('messages').insert([{

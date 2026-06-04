@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { callBitrix, parseNestedForm, normalizeConfigRow } from '../lib/bitrix24.ts'
@@ -49,6 +50,8 @@ function embedHtml(appBaseUrl, path) {
 }
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   if (req.method === 'GET') {
     const urlParams = new URL(req.url).searchParams
     const pl = urlParams.get('PLACEMENT') || 'DEFAULT'

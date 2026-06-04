@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
@@ -8,6 +9,8 @@ const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET') || ''
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     const headers = Object.fromEntries(req.headers)
 

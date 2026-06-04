@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { loadFirstGlobalConfig, callBitrix, ensureBitrixToken, makeJsonResponse } from '../lib/bitrix24.ts'
@@ -7,6 +8,8 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     if (req.method !== 'POST') return new Response('method not allowed', { status: 405 })
 

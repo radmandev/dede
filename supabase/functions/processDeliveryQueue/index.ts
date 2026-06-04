@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { performSendPulseDelivery, recordDeliveryError } from '../lib/sendpulse.ts'
@@ -15,6 +16,8 @@ function nextAttemptDate(attempts) {
 }
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     // pick a small batch to process
     const { data: items, error } = await supabase.from('delivery_queue').select('*').lte('next_attempt_at', new Date().toISOString()).lt('attempts', 'max_attempts').limit(20)

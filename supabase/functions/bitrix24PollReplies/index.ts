@@ -1,3 +1,4 @@
+import { corsHeaders, handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { callBitrix, ensureBitrixToken, makeJsonResponse } from '../lib/bitrix24.ts'
@@ -158,6 +159,8 @@ async function pollAccount(account) {
 }
 
 serve(async (req: Request) => {
+  const corsRes = handleCors(req)
+  if (corsRes) return corsRes
   try {
     const authToken = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     if (!authToken) return new Response('unauthorized', { status: 401 })
