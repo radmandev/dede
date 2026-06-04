@@ -10,3 +10,17 @@ export function handleCors(req: Request): Response | null {
   }
   return null
 }
+
+export function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+export function textResponse(text: string, status = 200): Response {
+  return new Response(text, {
+    status,
+    headers: corsHeaders,
+  })
+}
