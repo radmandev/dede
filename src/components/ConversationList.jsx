@@ -27,27 +27,7 @@ export default function ConversationList({ conversations, selectedId, onSelect }
     });
   }, [conversations, statusFilter, search]);
 
-  useEffect(() => {
-    const channel = supabase.channel("realtime-conversations");
-
-    channel.on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "conversations" },
-      () => queryClient.invalidateQueries({ queryKey: ["conversations"] })
-    );
-
-    channel.on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "messages" },
-      () => queryClient.invalidateQueries({ queryKey: ["conversations"] })
-    );
-
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+  // Realtime is handled by Dashboard — no duplicate channel here
 
   return (
     <div className="flex flex-col h-full bg-card">

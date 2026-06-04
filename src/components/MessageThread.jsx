@@ -17,7 +17,7 @@ export default function MessageThread({ conversation }) {
     enabled: !!conversation?.id,
   });
 
-  // Real-time subscription — UI updates instantly when a message is saved to DB
+  // Real-time subscription — directly update cache, no refetch round-trip
   useEffect(() => {
     if (!conversation?.id) return;
 
@@ -26,13 +26,15 @@ export default function MessageThread({ conversation }) {
     channel.on(
       "postgres_changes",
       {
-        event: "*",
+        event: "INSERT",
         schema: "public",
         table: "messages",
         filter: `conversation_id=eq.${conversation.id}`,
       },
-      () => {
-        queryClient.invalidateQueries({ queryKey: ["messages", conversation.id] });
+      ({ new: msg }) => {
+        queryClient.setQueryData(["messages", conversation.id], (old = []) =>
+          old.some((m) => m.id === msg.id) ? old : [...old, msg]
+        );
       }
     );
 
@@ -69,15 +71,6 @@ export default function MessageThread({ conversation }) {
     }
   }, [conversation?.id]);
 
-  // Agent replies arrive in real-time via the Bitrix24 webhook (bitrix24Handler).
-  // This poll is now just a once-a-minute safety net to catch anything a webhook might miss.
-  useEffect(() => {
-    if (!conversation?.id) return;
-    const poll = () => base44.functions.invoke('bitrix24PollReplies', {}).catch(() => {});
-    poll();
-    const timer = setInterval(poll, 8000);
-    return () => clearInterval(timer);
-  }, [conversation?.id]);
 
   useEffect(() => {
     if (scrollRef.current) {

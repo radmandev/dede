@@ -14,24 +14,35 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    const convChannel = supabase.channel("realtime-dashboard-conversations");
+    const channel = supabase.channel("realtime-dashboard");
 
-    convChannel.on(
+    // Directly update cache — no refetch round-trip
+    channel.on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "conversations" },
-      () => queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      { event: "INSERT", schema: "public", table: "conversations" },
+      ({ new: row }) => {
+        queryClient.setQueryData(["conversations"], (old = []) =>
+          [row, ...old.filter((c) => c.id !== row.id)]
+        );
+      }
     );
 
-    convChannel.on(
+    channel.on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "messages" },
-      () => queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      { event: "UPDATE", schema: "public", table: "conversations" },
+      ({ new: row }) => {
+        queryClient.setQueryData(["conversations"], (old = []) =>
+          old.map((c) => (c.id === row.id ? row : c))
+            .sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at))
+        );
+      }
     );
 
-    convChannel.subscribe();
+    // A new message updates the conversation's last_message — handle via conversations UPDATE above
+    channel.subscribe();
 
     return () => {
-      supabase.removeChannel(convChannel);
+      supabase.removeChannel(channel);
     };
   }, [queryClient]);
 
