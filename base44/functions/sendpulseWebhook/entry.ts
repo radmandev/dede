@@ -136,16 +136,39 @@ Deno.serve(async (req) => {
       liveChatText ||
       (typeof contact.last_message === 'string' && contact.last_message ? contact.last_message : '') || '';
 
-    const msgType = channelMsg?.type || lastMsgData?.type || 'text';
+    const rawMsgType = channelMsg?.type || lastMsgData?.type || 'text';
+    // Normalise to the types our UI understands
+    const msgTypeMap: Record<string, string> = { image: 'image', audio: 'audio', voice: 'audio', video: 'file', document: 'file', file: 'file', text: 'text', template: 'template' };
+    const msgType = msgTypeMap[rawMsgType] || 'text';
+
     const mediaUrl =
-      channelMsg?.image?.url || channelMsg?.document?.url || channelMsg?.audio?.url || channelMsg?.video?.url ||
-      lastMsgData?.image?.url || lastMsgData?.document?.url || lastMsgData?.audio?.url || lastMsgData?.video?.url || '';
-    const mediaFilename = channelMsg?.document?.filename || lastMsgData?.document?.filename || '';
+      channelMsg?.image?.url || channelMsg?.image?.link ||
+      channelMsg?.document?.url || channelMsg?.document?.link ||
+      channelMsg?.audio?.url || channelMsg?.audio?.link ||
+      channelMsg?.video?.url || channelMsg?.video?.link ||
+      // Telegram: photo is an array, pick the last (largest) element
+      (Array.isArray(channelMsg?.photo) ? channelMsg.photo[channelMsg.photo.length - 1]?.file_url : null) ||
+      channelMsg?.photo?.file_url ||
+      // Facebook/Instagram attachments
+      channelMsg?.attachment?.payload?.url ||
+      (Array.isArray(channelMsg?.attachments) ? channelMsg.attachments[0]?.payload?.url : null) ||
+      lastMsgData?.image?.url || lastMsgData?.image?.link ||
+      lastMsgData?.document?.url || lastMsgData?.document?.link ||
+      lastMsgData?.audio?.url || lastMsgData?.audio?.link ||
+      lastMsgData?.video?.url || lastMsgData?.video?.link || '';
+
+    const mediaFilename =
+      channelMsg?.document?.filename || channelMsg?.image?.filename ||
+      lastMsgData?.document?.filename || lastMsgData?.image?.filename || '';
 
     const messageId = channelMsg?.id || item?.info?.message?.id || '';
     const title = item?.title || '';
     const direction = (title === 'agent_reply' || title === 'outgoing_message') ? 'outbound' : 'inbound';
     const conversationKey = `${botId}_${contactId}`;
+
+    // Friendly preview for media-only messages shown in the conversation list
+    const mediaPreviewText = msgType === 'image' ? '📷 Image' : msgType === 'audio' ? '🎵 Audio' : msgType === 'file' ? '📎 File' : '';
+    const effectiveText = messageText || (mediaUrl ? mediaPreviewText : '');
 
     // Outbound echoes are persisted by bitrix24Handler — skip them here to cut DB load and avoid duplicates.
     if (direction === 'outbound') {
@@ -165,7 +188,7 @@ Deno.serve(async (req) => {
     if (conversations.length > 0) {
       conversation = conversations[0];
       await withRetry(() => db.entities.Conversation.update(conversation.id, {
-        last_message_text: messageText.substring(0, 200),
+        last_message_text: effectiveText.substring(0, 200),
         last_message_at: new Date().toISOString(),
         unread_count: (conversation.unread_count || 0) + 1,
         contact_name: contactName,
@@ -184,17 +207,20 @@ Deno.serve(async (req) => {
         channel,
         status: 'open',
         unread_count: 1,
-        last_message_text: messageText.substring(0, 200),
+        last_message_text: effectiveText.substring(0, 200),
         last_message_at: new Date().toISOString(),
       }));
     }
 
-    if (messageText || mediaUrl) {
+    if (effectiveText || mediaUrl) {
       await withRetry(() => db.entities.Message.create({
         conversation_id: conversation.id,
         sendpulse_message_id: messageId,
         sender_name: contactName,
         message_text: messageText,
+        message_type: msgType,
+        media_url: mediaUrl || null,
+        media_name: mediaFilename || null,
         direction,
         channel,
       }));
