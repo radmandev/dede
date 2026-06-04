@@ -2,8 +2,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 const env = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : process.env;
-const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://gxhiabxjvzmumxxmsnhy.supabase.co';
-const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://joiodrhhvhxmushujxze.supabase.co';
+const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaW9kcmhodmh4bXVzaHVqeHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjUwMDgsImV4cCI6MjA5NjE0MTAwOH0.QEY6CjZvmyznF4HLoEdNjmiNIxlX-dVAtkEwxIjuwUU';
 const STORAGE_BUCKET = env.VITE_SUPABASE_STORAGE_BUCKET || 'attachments';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
