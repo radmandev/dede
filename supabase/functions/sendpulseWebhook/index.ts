@@ -74,6 +74,7 @@ serve(async (req: Request) => {
       if (convKey) {
         const upsertPayload: any = {
           sendpulse_conversation_id: convKey,
+          sendpulse_contact_id: convKey,
           contact_name: contact.name || null,
           channel,
           last_message_text: messageText,
