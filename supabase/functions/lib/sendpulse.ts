@@ -37,34 +37,58 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
   const spUrl = channel === 'live_chat' ? 'https://api.sendpulse.com/live-chat/contacts/send' : `https://api.sendpulse.com/${path}/contacts/send`
   const spHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` }
 
+  // Build payload — each channel has its own API shape
+  function buildTextPayload(text: string) {
+    if (channel === 'live_chat') {
+      return { contact_id: contactId, messages: [{ type: 'text', text: { text } }] }
+    }
+    if (channel === 'instagram' || channel === 'facebook') {
+      // Instagram/Facebook: messages array with nested message object, text is a plain string
+      return { contact_id: contactId, messages: [{ type: 'text', message: { type: 'text', text } }] }
+    }
+    // WhatsApp / Telegram: singular message with text.body
+    return { contact_id: contactId, message: { type: 'text', text: { body: text } } }
+  }
+
+  function buildAttachPayload(attType: string, attLink: string, attName: string) {
+    if (channel === 'instagram' || channel === 'facebook') {
+      if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
+        return { contact_id: contactId, messages: [{ type: 'image', message: { type: 'image', url: attLink } }] }
+      }
+      return { contact_id: contactId, messages: [{ type: 'file', message: { type: 'file', url: attLink, filename: attName } }] }
+    }
+    if (channel === 'live_chat') {
+      return { contact_id: contactId, messages: [{ type: attType === 'image' ? 'image' : 'file', url: attLink }] }
+    }
+    // WhatsApp / Telegram
+    if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
+      return { contact_id: contactId, message: { type: 'image', image: { link: attLink } } }
+    }
+    if (attType === 'audio' || /\.(mp3|ogg|wav|m4a)$/i.test(attName)) {
+      return { contact_id: contactId, message: { type: 'audio', audio: { link: attLink } } }
+    }
+    return { contact_id: contactId, message: { type: 'document', document: { link: attLink, filename: attName } } }
+  }
+
   // collect responses for diagnostics
   const results = []
   if (cleanText) {
-    const spPayload = channel === 'live_chat'
-      ? { contact_id: contactId, messages: [{ type: 'text', text: { text: cleanText } }] }
-      : { contact_id: contactId, message: { type: 'text', text: { body: cleanText } } }
+    const spPayload = buildTextPayload(cleanText)
     const r = await fetch(spUrl, { method: 'POST', headers: spHeaders, body: JSON.stringify(spPayload) })
     const body = await r.text().catch(() => null)
     if (!r.ok) throw new Error(`sendpulse text failed: ${r.status} ${body}`)
-    results.push({ type: 'text', status: r.status, body: body })
+    results.push({ type: 'text', status: r.status, body })
   }
   for (const att of attachments || []) {
     const attType = (att.type || '').toLowerCase()
     const attLink = att.link || ''
     const attName = att.name || 'file'
     if (!attLink) continue
-    let spPayload
-    if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
-      spPayload = { contact_id: contactId, message: { type: 'image', image: { link: attLink } } }
-    } else if (attType === 'audio' || /\.(mp3|ogg|wav|m4a)$/i.test(attName)) {
-      spPayload = { contact_id: contactId, message: { type: 'audio', audio: { link: attLink } } }
-    } else {
-      spPayload = { contact_id: contactId, message: { type: 'document', document: { link: attLink, filename: attName } } }
-    }
+    const spPayload = buildAttachPayload(attType, attLink, attName)
     const r = await fetch(spUrl, { method: 'POST', headers: spHeaders, body: JSON.stringify(spPayload) })
     const body = await r.text().catch(() => null)
     if (!r.ok) throw new Error(`sendpulse attach failed: ${r.status} ${body}`)
-    results.push({ type: 'attach', status: r.status, body: body })
+    results.push({ type: 'attach', status: r.status, body })
   }
   return results
 }

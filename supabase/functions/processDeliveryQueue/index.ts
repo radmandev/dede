@@ -8,10 +8,8 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
-// simple exponential backoff helper
-function nextAttemptDate(attempts) {
-  const base = 30 // seconds
-  const seconds = Math.pow(2, attempts) * base
+function nextAttemptDate(attempts: number) {
+  const seconds = Math.pow(2, attempts) * 30
   return new Date(Date.now() + seconds * 1000).toISOString()
 }
 
@@ -19,19 +17,26 @@ serve(async (req: Request) => {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   try {
-    // pick a small batch to process
-    const { data: items, error } = await supabase.from('delivery_queue').select('*').lte('next_attempt_at', new Date().toISOString()).lt('attempts', 'max_attempts').limit(20)
+    // Fetch due items — compare attempts < max_attempts in JS since PostgREST
+    // can't compare two columns directly with the client filter API
+    const { data: items, error } = await supabase
+      .from('delivery_queue')
+      .select('*')
+      .lte('next_attempt_at', new Date().toISOString())
+      .limit(20)
+
     if (error) throw error
+
+    const eligible = (items || []).filter(it => (it.attempts || 0) < (it.max_attempts || 5))
+
     let processed = 0
-    for (const it of items || []) {
+    for (const it of eligible) {
       try {
         const payload = it.payload || {}
         await performSendPulseDelivery(supabase, it.sendpulse_account_id, it.channel, it.contact_id, payload.text, payload.attachments)
-        // remove from queue on success
         await supabase.from('delivery_queue').delete().eq('id', it.id)
         processed++
       } catch (e) {
-        // increment attempts, schedule next_attempt_at, log error
         const attempts = (it.attempts || 0) + 1
         const nextAt = nextAttemptDate(attempts)
         await supabase.from('delivery_queue').update({ attempts, next_attempt_at: nextAt, last_error: String(e), updated_at: new Date().toISOString() }).eq('id', it.id)
