@@ -19,32 +19,62 @@ function json(data: unknown, status = 200) {
 
 // ---------- Media re-hosting ----------
 
-async function reHostMedia(url: string, originalFilename: string): Promise<string> {
-  // Encode URL to handle Arabic chars/spaces before fetching
-  let encodedUrl = url
-  try { encodedUrl = encodeURI(decodeURI(url)) } catch { /* keep original */ }
-
-  // Try without auth first — S3 may allow access from Supabase's AWS infra even if private from browsers
-  let res = await fetch(encodedUrl)
-  if (!res.ok) throw new Error(`fetch failed: ${res.status} ${encodedUrl}`)
-
-  const buffer = await res.arrayBuffer()
-  const contentType = res.headers.get('content-type') || 'application/octet-stream'
-
-  // Build a safe ASCII filename (strip non-ASCII, collapse spaces)
-  const safeBase = (originalFilename || `media_${Date.now()}`)
+async function uploadToStorage(buffer: ArrayBuffer, contentType: string, filename: string): Promise<string> {
+  const safeBase = (filename || `media_${Date.now()}`)
     .replace(/[^\x00-\x7F]/g, '_')
     .replace(/\s+/g, '_')
     .replace(/_{2,}/g, '_')
     .substring(0, 80)
   const storagePath = `attachments/${Date.now()}_${safeBase}`
-
   const { error } = await supabase.storage
     .from('attachments')
     .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
   if (error) throw error
+  return supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
+}
 
-  return supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || url
+async function reHostMedia(opts: {
+  channel: string
+  spMessageId: string       // SendPulse internal message ID
+  platformMediaId: string   // WhatsApp/Instagram/Facebook numeric media ID
+  fallbackUrl: string       // S3 or other direct URL
+  filename: string
+  spToken: string | null
+}): Promise<string> {
+  const { channel, spMessageId, platformMediaId, fallbackUrl, filename, spToken } = opts
+
+  // Strategy 1: login.sendpulse.com media proxy — works for all channels with a Bearer token.
+  // URL shape: /api/chatbots-service/{channel}/messages/media?message_id=...&id=...
+  if (spToken && spMessageId) {
+    const channelSlug = channel === 'live_chat' ? 'live-chat' : channel
+    const idParam = platformMediaId ? `&id=${encodeURIComponent(platformMediaId)}` : ''
+    const proxyUrl = `https://login.sendpulse.com/api/chatbots-service/${channelSlug}/messages/media?message_id=${spMessageId}${idParam}`
+    try {
+      const res = await fetch(proxyUrl, { headers: { 'Authorization': `Bearer ${spToken}` } })
+      if (res.ok) {
+        const buffer = await res.arrayBuffer()
+        const contentType = res.headers.get('content-type') || 'application/octet-stream'
+        return await uploadToStorage(buffer, contentType, filename)
+      }
+      console.log(`proxy ${proxyUrl} → ${res.status}`)
+    } catch (e: any) { console.error('proxy fetch error:', e.message) }
+  }
+
+  // Strategy 2: direct URL (works for public CDN files, fails for private S3)
+  if (fallbackUrl) {
+    let encodedUrl = fallbackUrl
+    try { encodedUrl = encodeURI(decodeURI(fallbackUrl)) } catch { /* keep */ }
+    try {
+      const res = await fetch(encodedUrl)
+      if (res.ok) {
+        const buffer = await res.arrayBuffer()
+        const contentType = res.headers.get('content-type') || 'application/octet-stream'
+        return await uploadToStorage(buffer, contentType, filename)
+      }
+    } catch (e: any) { console.error('direct fetch error:', e.message) }
+  }
+
+  throw new Error('all media fetch strategies failed')
 }
 
 // ---------- Bitrix24 helpers ----------
@@ -168,8 +198,13 @@ serve(async (req: Request) => {
     const rawPhone = String(contact.phone || contact.variables?.phone || channelMsg?.from || '').replace(/[^\d]/g, '')
     const contactPhone = rawPhone ? '+' + rawPhone : ''
 
-    // Normalise message type first — needed to correctly extract text vs media URL
-    const rawMsgType: string = channelMsg?.type || lastMsgData?.type || 'text'
+    // Normalise message type first — needed to correctly extract text vs media URL.
+    // Instagram sends type=null with media inside channelMsg.attachments[].type
+    const rawMsgType: string =
+      channelMsg?.type ||
+      channelMsg?.attachments?.[0]?.type ||
+      channelMsg?.attachment?.type ||
+      lastMsgData?.type || 'text'
     const msgTypeMap: Record<string, string> = { image: 'image', audio: 'audio', voice: 'audio', video: 'file', document: 'file', file: 'file', text: 'text', template: 'template' }
     const msgType: string = msgTypeMap[rawMsgType] || 'text'
     const isMediaMsg = msgType === 'image' || msgType === 'audio' || msgType === 'file'
@@ -213,6 +248,13 @@ serve(async (req: Request) => {
       lastMsgData?.document?.filename || lastMsgData?.image?.filename ||
       // derive filename from URL path if nothing else
       (mediaUrl ? decodeURIComponent(mediaUrl.split('/').pop()?.split('?')[0] || '') : '') || ''
+
+    // Platform media ID — WhatsApp/Instagram/Facebook assign numeric IDs to media objects.
+    // Used with login.sendpulse.com/api/chatbots-service/{channel}/messages/media endpoint.
+    const platformMediaId: string =
+      channelMsg?.image?.id || channelMsg?.document?.id ||
+      channelMsg?.audio?.id || channelMsg?.video?.id ||
+      channelMsg?.sticker?.id || ''
 
     const messageId: string = channelMsg?.id || item?.info?.message?.id || ''
     const title: string = item?.title || ''
@@ -261,12 +303,41 @@ serve(async (req: Request) => {
       if (acc) { ownerId = acc.owner_id; sendpulseAccountId = acc.id }
     }
 
-    // Re-host media to Supabase Storage so we have a stable public URL
-    // (SendPulse S3 URLs are private — try server-to-server fetch which may bypass browser CORS/auth restrictions)
+    // Re-host media to Supabase Storage for a stable public URL.
+    // Primary strategy: SendPulse's own media proxy at login.sendpulse.com (requires Bearer token).
+    // Fallback: direct URL fetch (works for public CDN files, not private S3).
     let finalMediaUrl = mediaUrl
-    if (mediaUrl && isMediaMsg) {
+    if (isMediaMsg && (mediaUrl || (messageId && platformMediaId))) {
       try {
-        finalMediaUrl = await reHostMedia(mediaUrl, mediaFilename)
+        // Get SendPulse access token
+        let spToken: string | null = null
+        if (sendpulseAccountId) {
+          const { data: accRow } = await supabase
+            .from('sendpulse_accounts')
+            .select('access_token, token_expires_at, client_id, client_secret')
+            .eq('id', sendpulseAccountId)
+            .single()
+          if (accRow) {
+            if (accRow.access_token && accRow.token_expires_at && new Date(accRow.token_expires_at) > new Date(Date.now() + 60000)) {
+              spToken = accRow.access_token
+            } else if (accRow.client_id && accRow.client_secret) {
+              const tr = await fetch('https://api.sendpulse.com/oauth/access_token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ grant_type: 'client_credentials', client_id: accRow.client_id, client_secret: accRow.client_secret }),
+              })
+              const td = await tr.json()
+              if (td?.access_token) {
+                spToken = td.access_token
+                await supabase.from('sendpulse_accounts').update({
+                  access_token: td.access_token,
+                  token_expires_at: new Date(Date.now() + (td.expires_in || 3600) * 1000).toISOString(),
+                }).eq('id', sendpulseAccountId)
+              }
+            }
+          }
+        }
+        finalMediaUrl = await reHostMedia({ channel, spMessageId: messageId, platformMediaId, fallbackUrl: mediaUrl, filename: mediaFilename, spToken })
       } catch (e: any) {
         console.error('reHostMedia failed, storing original URL:', e.message)
       }
