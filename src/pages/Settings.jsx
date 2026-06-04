@@ -42,8 +42,9 @@ export default function Settings() {
     },
   });
 
-  const installerUrl = `${window.location.origin}/api/functions/bitrix24Installer`;
-  const handlerUrl = `${window.location.origin}/api/functions/bitrix24Handler`;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://joiodrhhvhxmushujxze.supabase.co';
+  const installerUrl = `${supabaseUrl}/functions/v1/bitrix24Installer`;
+  const handlerUrl = `${supabaseUrl}/functions/v1/bitrix24Handler`;
 
   const bindWebhook = useMutation({
     mutationFn: () => base44.functions.invoke("bitrix24BindReplyWebhook", {}),

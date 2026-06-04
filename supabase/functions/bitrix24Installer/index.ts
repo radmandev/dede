@@ -90,8 +90,9 @@ serve(async (req: Request) => {
     const globalConfig = normalizeConfigRow(configs?.[0])
     const rawBaseUrl = globalConfig.app_base_url || ''
     const appBaseUrl = rawBaseUrl.replace(/^https:\/\/preview--/, 'https://')
-    const installerUrl = appBaseUrl ? `${appBaseUrl}/api/functions/bitrix24Installer` : ''
-    const handlerUrl = appBaseUrl ? `${appBaseUrl}/api/functions/bitrix24Handler` : ''
+    const functionsBase = `${SUPABASE_URL}/functions/v1`
+    const installerUrl = `${functionsBase}/bitrix24Installer`
+    const handlerUrl = `${functionsBase}/bitrix24Handler`
     const dashboardUrl = appBaseUrl ? `${appBaseUrl}/` : ''
     const crmChatUrl = appBaseUrl ? `${appBaseUrl}/` : ''
 

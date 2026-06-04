@@ -28,10 +28,7 @@ serve(async (req: Request) => {
     if (accountErr) throw accountErr
     if (!accounts?.length) return makeJsonResponse({ error: 'No connected Bitrix24 portals found.' }, 404)
 
-    const globalConfig = await loadFirstGlobalConfig(supabase)
-    const appBaseUrl = (globalConfig.app_base_url || '').replace(/^https:\/\/preview--/, 'https://')
-    if (!appBaseUrl) return makeJsonResponse({ error: 'Set the App Production URL in Settings first.' }, 400)
-    const handlerUrl = `${appBaseUrl}/api/functions/bitrix24Handler`
+    const handlerUrl = `${SUPABASE_URL}/functions/v1/bitrix24Handler`
 
     const results = []
     for (const account of accounts) {
@@ -44,7 +41,7 @@ serve(async (req: Request) => {
 
       const before = await callBitrix(endpoint, token, 'event.get', {})
       const handlers = Array.isArray(before?.result) ? before.result : []
-      for (const h of handlers.filter((h) => h.event === 'ONIMCONNECTORMESSAGEADD' && /\/api\/functions\/bitrix24Handler/.test(h.handler || ''))) {
+      for (const h of handlers.filter((h) => h.event === 'ONIMCONNECTORMESSAGEADD' && (h.handler || '').includes('bitrix24Handler'))) {
         await callBitrix(endpoint, token, 'event.unbind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: h.handler })
       }
 

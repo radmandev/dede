@@ -42,11 +42,9 @@ serve(async (req: Request) => {
     const token = await ensureBitrixToken(supabase, account)
     if (!token) return makeJsonResponse({ error: 'Token expired and no refresh credentials. Reinstall the app on the portal.' }, 400)
 
-    const globalConfig = await loadFirstGlobalConfig(supabase)
-    const appBaseUrl = (globalConfig.app_base_url || '').replace(/^https:\/\/preview--/, 'https://')
-    if (!appBaseUrl) return makeJsonResponse({ error: 'App Production URL not set in Settings.' }, 400)
-    const installerUrl = `${appBaseUrl}/api/functions/bitrix24Installer`
-    const handlerUrl = `${appBaseUrl}/api/functions/bitrix24Handler`
+    const functionsBase = `${SUPABASE_URL}/functions/v1`
+    const installerUrl = `${functionsBase}/bitrix24Installer`
+    const handlerUrl = `${functionsBase}/bitrix24Handler`
 
     const connectorId = channel.bitrix24_connector_id || (account.member_id ? `whatsapp_sp_${account.member_id.substring(0, 10)}` : 'whatsapp_sendpulse')
     if (!channel.bitrix24_connector_id) {
