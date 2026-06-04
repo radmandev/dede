@@ -1,4 +1,4 @@
-import { serve } from 'std/server'
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { callBitrix, ensureBitrixToken, makeJsonResponse } from '../lib/bitrix24.ts'
 
