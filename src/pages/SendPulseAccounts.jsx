@@ -40,6 +40,9 @@ export default function SendPulseAccounts() {
       setForm(empty);
       setEditing(null);
     },
+    onError: (err) => {
+      toast.error("Failed to save: " + (err.message || "Unknown error"));
+    },
   });
 
   const deleteMutation = useMutation({
