@@ -1,0 +1,2 @@
+[functions.bitrix24Installer]
+verify_jwt = false

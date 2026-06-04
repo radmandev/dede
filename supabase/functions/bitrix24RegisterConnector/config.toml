@@ -1,0 +1,2 @@
+[functions.bitrix24RegisterConnector]
+verify_jwt = false

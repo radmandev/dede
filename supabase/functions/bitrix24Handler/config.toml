@@ -1,0 +1,2 @@
+[functions.bitrix24Handler]
+verify_jwt = false
