@@ -27,17 +27,19 @@ export const AuthProvider = ({ children }) => {
         setIsLoadingAuth(false);
         setAuthChecked(true);
         clearCache();
-      } else if (event === 'INITIAL_SESSION' || (event === 'SIGNED_IN' && !isAuthenticatedRef.current)) {
+      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        // checkUserAuth is safe to call anytime — it won't show the spinner if already authed
         checkUserAuth();
       }
-      // TOKEN_REFRESHED / USER_UPDATED / SIGNED_IN when already authed: skip to avoid flicker
+      // TOKEN_REFRESHED / USER_UPDATED: no action needed
     });
     return () => listener?.subscription?.unsubscribe?.();
   }, []);
 
   const checkUserAuth = async () => {
+    const alreadyAuthed = isAuthenticatedRef.current;
     try {
-      setIsLoadingAuth(true);
+      if (!alreadyAuthed) setIsLoadingAuth(true);
       const { data: sessionData } = await supabase.auth.getSession();
       const authUser = sessionData?.session?.user || null;
       if (!authUser) {
