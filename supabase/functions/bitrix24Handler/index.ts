@@ -69,7 +69,8 @@ serve(async (req: Request) => {
 
     if (bxAccount && accessToken) {
       const updates: any = { access_token: accessToken, token_expires_at: new Date(Date.now() + expiresIn * 1000).toISOString() }
-      if (serverEndpoint) updates.domain = serverEndpoint
+      // Never overwrite domain with oauth.bitrix.info — that's the generic OAuth endpoint, not the portal REST URL
+      if (serverEndpoint && !serverEndpoint.includes('oauth.bitrix.info')) updates.domain = serverEndpoint
       await supabase.from('bitrix24_accounts').update(updates).eq('id', bxAccount.id)
       bxAccount = { ...bxAccount, ...updates }
     }

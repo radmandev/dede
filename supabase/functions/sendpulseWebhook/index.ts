@@ -117,7 +117,17 @@ async function sendToBitrix24(
   messageText: string, messageId: string, msgType: string,
   mediaUrl: string, mediaFilename: string, contactPhone: string
 ) {
-  if (!account.domain || !channelCfg.bitrix24_line_id) return
+  // Repair domain if bitrix24Handler corrupted it with the generic OAuth endpoint
+  let accountDomain = account.domain || ''
+  if (accountDomain.includes('oauth.bitrix.info') && account.name) {
+    const host = account.name.includes('.') ? account.name : null
+    if (host) {
+      accountDomain = `https://${host}/rest/`
+      await supabase.from('bitrix24_accounts').update({ domain: accountDomain }).eq('id', account.id)
+      console.log(`[b24] repaired domain from oauth.bitrix.info to ${accountDomain}`)
+    }
+  }
+  if (!accountDomain || accountDomain.includes('oauth.bitrix.info') || !channelCfg.bitrix24_line_id) return
 
   let token = account.access_token
   const expires = account.token_expires_at ? new Date(account.token_expires_at) : null
@@ -137,8 +147,8 @@ async function sendToBitrix24(
 
   const CONNECTOR_ID = channelCfg.bitrix24_connector_id || 'whatsapp_sendpulse'
   const LINE_ID = Number(channelCfg.bitrix24_line_id)
-  const endpoint = account.domain.endsWith('/') ? account.domain : account.domain + '/'
-  console.log(`[b24] forwarding to connector=${CONNECTOR_ID} line=${LINE_ID} domain=${account.domain}`)
+  const endpoint = accountDomain.endsWith('/') ? accountDomain : accountDomain + '/'
+  console.log(`[b24] forwarding to connector=${CONNECTOR_ID} line=${LINE_ID} domain=${accountDomain}`)
 
   // Ensure connector is active on this line before sending (re-registration can reset activation)
   try {
