@@ -61,22 +61,17 @@ async function reHostMedia(opts: {
       .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
     if (error) throw error
 
-    // Check if the public URL is accessible — if the bucket isn't public, fall back to a signed URL
-    const publicUrl = supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
-    try {
-      const probe = await fetch(publicUrl, { method: 'HEAD' })
-      if (probe.ok) {
-        console.log(`[media] public URL accessible: ${publicUrl}`)
-        return { url: publicUrl, filename: finalName }
-      }
-      console.warn(`[media] public URL returned ${probe.status} — generating signed URL`)
-    } catch (e: any) { console.warn('[media] public URL probe failed:', e.message) }
-
-    // Bucket is private — use a 7-day signed URL so Bitrix24 can download it
+    // Always use a signed URL — Edge Functions run inside Supabase's network so a public-URL probe
+    // returns 200 even for private buckets. Bitrix24 is external and would get 403 on a private bucket.
     const { data: signed, error: signErr } = await supabase.storage.from('attachments').createSignedUrl(storagePath, 604800)
-    if (signErr || !signed?.signedUrl) throw new Error('Failed to create signed URL: ' + signErr?.message)
-    console.log(`[media] using signed URL (7d): ${signed.signedUrl}`)
-    return { url: signed.signedUrl, filename: finalName }
+    if (signed?.signedUrl) {
+      console.log(`[media] using signed URL (7d): ${signed.signedUrl.substring(0, 80)}`)
+      return { url: signed.signedUrl, filename: finalName }
+    }
+    // Signed URL failed — fall back to public URL (works if bucket is actually public)
+    console.warn('[media] signed URL failed, falling back to public URL:', signErr?.message)
+    const publicUrl = supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
+    return { url: publicUrl, filename: finalName }
   }
 
   const channelSlug = channel === 'live_chat' ? 'live-chat' : channel
