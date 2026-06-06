@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { base44, supabase, clearCache } from '@/api/base44Client';
 
 const AuthContext = createContext();
@@ -11,12 +11,15 @@ export const AuthProvider = ({ children }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const isAuthenticatedRef = useRef(false);
 
   useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION immediately on registration,
-    // so we don't need a separate checkUserAuth() call here.
+    // onAuthStateChange fires INITIAL_SESSION immediately on mount.
+    // SIGNED_IN can fire again on tab focus/token refresh — skip it if already authed
+    // to avoid showing the loading spinner unnecessarily.
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
+        isAuthenticatedRef.current = false;
         setUser(null);
         setCurrentOrg(null);
         setCurrentMembership(null);
@@ -24,10 +27,10 @@ export const AuthProvider = ({ children }) => {
         setIsLoadingAuth(false);
         setAuthChecked(true);
         clearCache();
-      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+      } else if (event === 'INITIAL_SESSION' || (event === 'SIGNED_IN' && !isAuthenticatedRef.current)) {
         checkUserAuth();
       }
-      // TOKEN_REFRESHED: session is still valid — skip full reload to avoid flicker
+      // TOKEN_REFRESHED / USER_UPDATED / SIGNED_IN when already authed: skip to avoid flicker
     });
     return () => listener?.subscription?.unsubscribe?.();
   }, []);
@@ -89,6 +92,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       setUser(authUser);
+      isAuthenticatedRef.current = true;
       setIsAuthenticated(true);
       setIsLoadingAuth(false);
       setAuthChecked(true);
