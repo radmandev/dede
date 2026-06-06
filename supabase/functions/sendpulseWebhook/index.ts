@@ -276,31 +276,60 @@ serve(async (req: Request) => {
     }
 
     // Resolve bot UUID + owner/account from sendpulse_bots (botId is a Mongo hex ID, not a UUID)
+    // Prefer org-linked bot rows — duplicate bot_ids exist when account was migrated to org system
     let botUuid: string | null = null
     let ownerId: string | null = null
+    let orgId: string | null = null
     let sendpulseAccountId: string | null = null
     if (botId) {
-      const { data: botRow } = await supabase
+      // First try: bot with an org attached
+      const { data: orgBot } = await supabase
         .from('sendpulse_bots')
-        .select('id, owner_id, sendpulse_account_id')
+        .select('id, owner_id, sendpulse_account_id, organization_id')
+        .eq('bot_id', botId)
+        .not('organization_id', 'is', null)
+        .limit(1)
+        .single()
+      // Fall back to any bot row if none has an org
+      const { data: anyBot } = orgBot ? { data: orgBot } : await supabase
+        .from('sendpulse_bots')
+        .select('id, owner_id, sendpulse_account_id, organization_id')
         .eq('bot_id', botId)
         .limit(1)
         .single()
+      const botRow = anyBot
       if (botRow) {
         botUuid = botRow.id
         ownerId = botRow.owner_id
+        orgId = botRow.organization_id
         sendpulseAccountId = botRow.sendpulse_account_id
       }
     }
-    // Fall back to first account if bot not found
-    if (!ownerId) {
+    // Fall back to account lookup if bot not found
+    if (!sendpulseAccountId) {
       const { data: acc } = await supabase
         .from('sendpulse_accounts')
-        .select('id, owner_id')
+        .select('id, owner_id, organization_id')
         .order('created_at', { ascending: true })
         .limit(1)
         .single()
-      if (acc) { ownerId = acc.owner_id; sendpulseAccountId = acc.id }
+      if (acc) {
+        ownerId = ownerId || acc.owner_id
+        orgId = orgId || acc.organization_id
+        sendpulseAccountId = acc.id
+      }
+    }
+    // If org not on bot row, look it up from the account
+    if (!orgId && sendpulseAccountId) {
+      const { data: acc } = await supabase
+        .from('sendpulse_accounts')
+        .select('organization_id, owner_id')
+        .eq('id', sendpulseAccountId)
+        .single()
+      if (acc) {
+        orgId = orgId || acc.organization_id
+        ownerId = ownerId || acc.owner_id
+      }
     }
 
     // Re-host media to Supabase Storage for a stable public URL.
@@ -355,6 +384,7 @@ serve(async (req: Request) => {
     if (contactPhone) upsertPayload.contact_phone = contactPhone
     if (botUuid) upsertPayload.sendpulse_bot_id = botUuid
     if (ownerId) upsertPayload.owner_id = ownerId
+    if (orgId) upsertPayload.organization_id = orgId
     if (sendpulseAccountId) upsertPayload.sendpulse_account_id = sendpulseAccountId
 
     const { data: convData, error: convErr } = await supabase

@@ -2,10 +2,12 @@ import { handleCors, jsonResponse, textResponse } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { ensureSendPulseToken } from '../lib/sendpulse.ts'
-import { loadFirstGlobalConfig, makeJsonResponse } from '../lib/bitrix24.ts'
+import { makeJsonResponse } from '../lib/bitrix24.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+// Webhook URL is always the Supabase functions endpoint — never the app's frontend URL
+const WEBHOOK_URL = `${SUPABASE_URL}/functions/v1/sendpulseWebhook`
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 const CHANNELS = [
@@ -40,10 +42,7 @@ serve(async (req: Request) => {
     const token = await ensureSendPulseToken(supabase, account.id)
     if (!token) return makeJsonResponse({ error: 'Failed to authenticate with SendPulse' }, 400)
 
-    const globalConfig = await loadFirstGlobalConfig(supabase)
-    const rawBase = globalConfig.app_base_url || origin || ''
-    const baseUrl = rawBase.replace(/^https:\/\/preview--/, 'https://').replace(/\/$/, '')
-    const webhookUrl = baseUrl ? `${baseUrl}/api/functions/sendpulseWebhook` : ''
+    const webhookUrl = WEBHOOK_URL
 
     const { data: existingBots = [], error: existingErr } = await supabase.from('sendpulse_bots').select('*').eq('sendpulse_account_id', sendpulse_account_id)
     if (existingErr) throw existingErr
@@ -80,6 +79,7 @@ serve(async (req: Request) => {
         const key = `${ch.key}_${botId}`
         const payload = {
           owner_id: account.owner_id || null,
+          organization_id: account.organization_id || null,
           name,
           sendpulse_account_id,
           bot_id: botId,
