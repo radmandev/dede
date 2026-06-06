@@ -109,7 +109,8 @@ serve(async (req: Request) => {
         portalEndpoint = ''
       }
     }
-    const serverEndpoint = portalEndpoint || data.SERVER_ENDPOINT || data.auth?.server_endpoint || ''
+    // serverEndpoint may be empty for CONTACT_CENTER iframes (no referer). Will be patched from account.domain below.
+    let serverEndpoint = portalEndpoint || data.SERVER_ENDPOINT || data.auth?.server_endpoint || ''
 
     if (!accessToken) {
       console.error('No access token in installer POST')
@@ -135,6 +136,13 @@ serve(async (req: Request) => {
       const { data: existing = [] } = await supabase.from('bitrix24_accounts').select('*').eq('member_id', memberId).limit(1)
       account = existing[0] || null
     }
+
+    // Fallback: CONTACT_CENTER iframes don't always send referer/SERVER_ENDPOINT,
+    // but the account already has the domain captured during DEFAULT install.
+    if (!serverEndpoint && account?.domain) {
+      serverEndpoint = account.domain
+    }
+    console.log(`[installer] placement=${placement} memberId=${memberId} serverEndpoint=${serverEndpoint}`)
 
     const accountData = {
       domain: serverEndpoint || account?.domain || '',
@@ -217,12 +225,16 @@ serve(async (req: Request) => {
       const lineId = String(placementOptions.LINE || placementOptions.CONNECTOR_LINE || placementOptions.ACTIVE_LINE || '')
       console.log('[installer] CONTACT_CENTER rawPO:', JSON.stringify(rawPO), 'lineId:', lineId)
       if (lineId) {
-        await callBitrix(serverEndpoint, accessToken, 'imconnector.activate', { CONNECTOR: connectorId, LINE: lineId, ACTIVE: 'Y' })
-        await callBitrix(serverEndpoint, accessToken, 'imconnector.connector.data.set', {
+        const lineNum = Number(lineId)
+        const activateRes = await callBitrix(serverEndpoint, accessToken, 'imconnector.activate', { CONNECTOR: connectorId, LINE: lineNum, ACTIVE: 'Y' })
+        console.log('[installer] imconnector.activate:', JSON.stringify(activateRes))
+
+        const dataSetRes = await callBitrix(serverEndpoint, accessToken, 'imconnector.connector.data.set', {
           CONNECTOR: connectorId,
-          LINE: Number(lineId),
+          LINE: lineNum,
           DATA: { ID: `whatsapp_sendpulse_line_${lineId}`, NAME: 'WhatsApp (SendPulse)', URL: 'https://wa.me/', URL_IM: 'https://wa.me/' },
         })
+        console.log('[installer] imconnector.connector.data.set:', JSON.stringify(dataSetRes))
 
         const { data: existingChannels = [] } = await supabase.from('bitrix24_open_channels').select('*').eq('bitrix24_account_id', account?.id).eq('bitrix24_line_id', lineId).limit(1)
         if (!existingChannels.length) {
@@ -254,10 +266,11 @@ serve(async (req: Request) => {
     let finalHtml: string
     if (placement === 'CONTACT_CENTER') {
       const capturedLineId = (() => {
-        try {
-          const opts = JSON.parse(data.PLACEMENT_OPTIONS || '{}')
-          return String(opts.LINE || opts.CONNECTOR_LINE || opts.ACTIVE_LINE || '')
-        } catch { return '' }
+        const rawPO2 = data.PLACEMENT_OPTIONS
+        const opts: any = (rawPO2 && typeof rawPO2 === 'object')
+          ? rawPO2
+          : (() => { try { return JSON.parse(rawPO2 || '{}') } catch { return {} } })()
+        return String(opts.LINE || opts.CONNECTOR_LINE || opts.ACTIVE_LINE || '')
       })()
       finalHtml = contactCenterHtml(capturedLineId, connectorId, dashboardUrl)
     } else {
