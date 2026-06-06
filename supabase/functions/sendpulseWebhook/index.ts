@@ -121,13 +121,37 @@ async function sendToBitrix24(
 
   let token = account.access_token
   const expires = account.token_expires_at ? new Date(account.token_expires_at) : null
-  if (!token || !expires || expires < new Date(Date.now() + 30000)) {
+  const needsRefresh = !token || !expires || expires < new Date(Date.now() + 30000)
+  console.log(`[b24] token check: hasToken=${!!token} expires=${expires?.toISOString()} needsRefresh=${needsRefresh} hasClientId=${!!account.app_client_id} hasClientSecret=${!!account.app_client_secret} hasRefreshToken=${!!account.refresh_token}`)
+  if (needsRefresh) {
     const refreshed = await refreshBitrix24Token(account)
-    if (refreshed?.access_token) token = refreshed.access_token
-    else { console.warn('[b24] token refresh failed — skipping forward'); return }
+    if (refreshed?.access_token) {
+      token = refreshed.access_token
+      console.log('[b24] token refreshed successfully')
+    } else {
+      console.warn('[b24] token refresh failed — attempting with current token anyway')
+      // Try with current token even if expired (Bitrix24 may still accept briefly)
+      if (!token) { console.error('[b24] no token at all — giving up'); return }
+    }
   }
 
   const CONNECTOR_ID = channelCfg.bitrix24_connector_id || 'whatsapp_sendpulse'
+  const LINE_ID = Number(channelCfg.bitrix24_line_id)
+  const endpoint = account.domain.endsWith('/') ? account.domain : account.domain + '/'
+  console.log(`[b24] forwarding to connector=${CONNECTOR_ID} line=${LINE_ID} domain=${account.domain}`)
+
+  // Ensure connector is active on this line before sending (re-registration can reset activation)
+  try {
+    const activateRes = await fetch(`${endpoint}imconnector.activate?auth=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ CONNECTOR: CONNECTOR_ID, LINE: LINE_ID, ACTIVE: 'Y' }),
+    })
+    const activateData = await activateRes.json()
+    if (activateData?.error) console.warn('[b24] imconnector.activate warn:', JSON.stringify(activateData))
+    else console.log('[b24] imconnector.activate ok')
+  } catch (e: any) { console.warn('[b24] imconnector.activate failed (non-fatal):', e.message) }
+
   const unixNow = Math.floor(Date.now() / 1000)
   const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
 
@@ -146,7 +170,7 @@ async function sendToBitrix24(
 
   const payload = {
     CONNECTOR: CONNECTOR_ID,
-    LINE: Number(channelCfg.bitrix24_line_id),
+    LINE: LINE_ID,
     MESSAGES: [{
       user: {
         id: String(conversation.sendpulse_contact_id),
@@ -160,7 +184,6 @@ async function sendToBitrix24(
     }],
   }
 
-  const endpoint = account.domain.endsWith('/') ? account.domain : account.domain + '/'
   const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
