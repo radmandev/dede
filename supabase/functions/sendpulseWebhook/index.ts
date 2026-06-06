@@ -19,59 +19,69 @@ function json(data: unknown, status = 200) {
 
 // ---------- Media re-hosting ----------
 
-async function uploadToStorage(buffer: ArrayBuffer, contentType: string, filename: string): Promise<string> {
-  const safeBase = (filename || `media_${Date.now()}`)
-    .replace(/[^\x00-\x7F]/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_{2,}/g, '_')
-    .substring(0, 80)
-  const storagePath = `attachments/${Date.now()}_${safeBase}`
-  const { error } = await supabase.storage
-    .from('attachments')
-    .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
-  if (error) throw error
-  return supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
+const CONTENT_TYPE_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/wav': '.wav', 'audio/aac': '.aac',
+  'video/mp4': '.mp4', 'video/ogg': '.ogv',
+  'application/pdf': '.pdf',
 }
 
+function extFromContentType(ct: string): string {
+  return CONTENT_TYPE_EXT[(ct.split(';')[0] || '').trim().toLowerCase()] || ''
+}
+
+function extFromMsgType(msgType: string): string {
+  if (msgType === 'image') return '.jpg'
+  if (msgType === 'audio') return '.mp3'
+  if (msgType === 'file') return '.bin'
+  return ''
+}
+
+// Returns { url, filename } — filename includes the proper extension so Bitrix24 can identify the type
 async function reHostMedia(opts: {
   channel: string
-  spMessageId: string       // SendPulse internal message ID
-  platformMediaId: string   // WhatsApp/Instagram/Facebook numeric media ID
-  fallbackUrl: string       // S3 or other direct URL
-  filename: string
+  spMessageId: string
+  platformMediaId: string
+  fallbackUrl: string
+  filename: string      // hint — may be empty; extension is derived from content-type
+  msgType: string       // 'image' | 'audio' | 'file' — fallback when content-type is generic
   spToken: string | null
-}): Promise<string> {
-  const { channel, spMessageId, platformMediaId, fallbackUrl, filename, spToken } = opts
+}): Promise<{ url: string; filename: string }> {
+  const { channel, spMessageId, platformMediaId, fallbackUrl, filename, msgType, spToken } = opts
 
-  // Strategy 1: login.sendpulse.com media proxy — works for all channels with a Bearer token.
-  // URL shape: /api/chatbots-service/{channel}/messages/media?message_id=...&id=...
+  async function uploadBuffer(buffer: ArrayBuffer, contentType: string): Promise<{ url: string; filename: string }> {
+    // Derive the best filename with a proper extension
+    let ext = extFromContentType(contentType)
+    if (!ext) ext = extFromMsgType(msgType)
+    const base = (filename || 'media').replace(/[^\x00-\x7F]/g, '_').replace(/\s+/g, '_').replace(/_{2,}/g, '_').substring(0, 60)
+    const finalName = base.includes('.') ? base : base + ext
+    const storagePath = `attachments/${Date.now()}_${finalName}`
+    const { error } = await supabase.storage
+      .from('attachments')
+      .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
+    if (error) throw error
+    const url = supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
+    return { url, filename: finalName }
+  }
+
+  // Strategy 1: SendPulse media proxy (authenticated)
   if (spToken && spMessageId) {
     const channelSlug = channel === 'live_chat' ? 'live-chat' : channel
     const idParam = platformMediaId ? `&id=${encodeURIComponent(platformMediaId)}` : ''
     const proxyUrl = `https://login.sendpulse.com/api/chatbots-service/${channelSlug}/messages/media?message_id=${spMessageId}${idParam}`
     try {
-      const res = await fetch(proxyUrl, { headers: { 'Authorization': `Bearer ${spToken}` } })
-      if (res.ok) {
-        const buffer = await res.arrayBuffer()
-        const contentType = res.headers.get('content-type') || 'application/octet-stream'
-        return await uploadToStorage(buffer, contentType, filename)
-      }
-      console.log(`proxy ${proxyUrl} → ${res.status}`)
-    } catch (e: any) { console.error('proxy fetch error:', e.message) }
+      const res = await fetch(proxyUrl, { headers: { Authorization: `Bearer ${spToken}` } })
+      if (res.ok) return await uploadBuffer(await res.arrayBuffer(), res.headers.get('content-type') || 'application/octet-stream')
+      console.log(`[media] proxy ${proxyUrl} → ${res.status}`)
+    } catch (e: any) { console.error('[media] proxy fetch error:', e.message) }
   }
 
-  // Strategy 2: direct URL (works for public CDN files, fails for private S3)
+  // Strategy 2: direct URL (public CDN)
   if (fallbackUrl) {
-    let encodedUrl = fallbackUrl
-    try { encodedUrl = encodeURI(decodeURI(fallbackUrl)) } catch { /* keep */ }
     try {
-      const res = await fetch(encodedUrl)
-      if (res.ok) {
-        const buffer = await res.arrayBuffer()
-        const contentType = res.headers.get('content-type') || 'application/octet-stream'
-        return await uploadToStorage(buffer, contentType, filename)
-      }
-    } catch (e: any) { console.error('direct fetch error:', e.message) }
+      const res = await fetch(encodeURI(decodeURI(fallbackUrl)))
+      if (res.ok) return await uploadBuffer(await res.arrayBuffer(), res.headers.get('content-type') || 'application/octet-stream')
+    } catch (e: any) { console.error('[media] direct fetch error:', e.message) }
   }
 
   throw new Error('all media fetch strategies failed')
@@ -111,36 +121,42 @@ async function sendToBitrix24(
 
   let token = account.access_token
   const expires = account.token_expires_at ? new Date(account.token_expires_at) : null
-  if (!token || !expires || expires < new Date()) {
+  if (!token || !expires || expires < new Date(Date.now() + 30000)) {
     const refreshed = await refreshBitrix24Token(account)
     if (refreshed?.access_token) token = refreshed.access_token
-    else { console.warn('Bitrix24 token refresh failed — skipping forward'); return }
+    else { console.warn('[b24] token refresh failed — skipping forward'); return }
   }
 
   const CONNECTOR_ID = channelCfg.bitrix24_connector_id || 'whatsapp_sendpulse'
   const unixNow = Math.floor(Date.now() / 1000)
-  const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText, type: 'text' }
+  const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
 
   if (mediaUrl) {
     const isImage = msgType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaFilename || '')
-    const isAudio = msgType === 'audio'
+    const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
     const fileType = isImage ? 'IMAGE' : isAudio ? 'AUDIO' : 'DOCUMENT'
-    messageObj.FILES = { '0': { link: mediaUrl, name: mediaFilename || 'file', type: fileType } }
-    if (!messageText) messageObj.type = fileType.toLowerCase()
+    // Ensure filename has an extension so Bitrix24 can identify the media type
+    let fname = mediaFilename || 'file'
+    if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
+    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
+
+  // Phone: prefer current message phone, fallback to conversation record
+  const phone = contactPhone || conversation.contact_phone || ''
 
   const payload = {
     CONNECTOR: CONNECTOR_ID,
     LINE: Number(channelCfg.bitrix24_line_id),
     MESSAGES: [{
       user: {
-        id: conversation.sendpulse_contact_id,
+        id: String(conversation.sendpulse_contact_id),
         name: conversation.contact_name || 'Customer',
-        phone: contactPhone || conversation.contact_phone || '',
-        avatar: '', online: true,
+        phone,
+        avatar: '',
+        online: true,
       },
       message: messageObj,
-      chat: { id: conversation.sendpulse_contact_id },
+      chat: { id: String(conversation.sendpulse_contact_id) },
     }],
   }
 
@@ -151,7 +167,11 @@ async function sendToBitrix24(
     body: JSON.stringify(payload),
   })
   const result = await res.json()
-  console.log('Bitrix24 forward result:', JSON.stringify(result))
+  if (result?.error) {
+    console.error('[b24] imconnector.send.messages error:', JSON.stringify(result))
+  } else {
+    console.log('[b24] sent ok, result:', JSON.stringify(result?.result).substring(0, 200))
+  }
 
   const returnedChatId =
     result?.result?.DATA?.RESULT?.[0]?.session?.CHAT_ID ||
@@ -344,47 +364,12 @@ serve(async (req: Request) => {
 
     console.log(`[webhook] resolved orgId=${orgId} ownerId=${ownerId} sendpulseAccountId=${sendpulseAccountId}`)
 
-    // Re-host media to Supabase Storage for a stable public URL.
-    // Primary strategy: SendPulse's own media proxy at login.sendpulse.com (requires Bearer token).
-    // Fallback: direct URL fetch (works for public CDN files, not private S3).
-    let finalMediaUrl = mediaUrl
-    if (isMediaMsg && (mediaUrl || (messageId && platformMediaId))) {
-      try {
-        // Get SendPulse access token
-        let spToken: string | null = null
-        if (sendpulseAccountId) {
-          const { data: accRow } = await supabase
-            .from('sendpulse_accounts')
-            .select('access_token, token_expires_at, client_id, client_secret')
-            .eq('id', sendpulseAccountId)
-            .single()
-          if (accRow) {
-            if (accRow.access_token && accRow.token_expires_at && new Date(accRow.token_expires_at) > new Date(Date.now() + 60000)) {
-              spToken = accRow.access_token
-            } else if (accRow.client_id && accRow.client_secret) {
-              const tr = await fetch('https://api.sendpulse.com/oauth/access_token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ grant_type: 'client_credentials', client_id: accRow.client_id, client_secret: accRow.client_secret }),
-              })
-              const td = await tr.json()
-              if (td?.access_token) {
-                spToken = td.access_token
-                await supabase.from('sendpulse_accounts').update({
-                  access_token: td.access_token,
-                  token_expires_at: new Date(Date.now() + (td.expires_in || 3600) * 1000).toISOString(),
-                }).eq('id', sendpulseAccountId)
-              }
-            }
-          }
-        }
-        finalMediaUrl = await reHostMedia({ channel, spMessageId: messageId, platformMediaId, fallbackUrl: mediaUrl, filename: mediaFilename, spToken })
-      } catch (e: any) {
-        console.error('reHostMedia failed, storing original URL:', e.message)
-      }
-    }
+    // ── Phase 2: three independent operations in parallel ───────────────────
+    // a) Upsert conversation
+    // b) Lookup Bitrix24 channel + account (uses botUuid)
+    // c) Re-host media to Supabase Storage (uses sendpulseAccountId)
+    // All three are independent of each other and can run simultaneously.
 
-    // Upsert conversation — always, regardless of Bitrix24 mapping
     const upsertPayload: any = {
       sendpulse_conversation_id: conversationKey,
       sendpulse_contact_id: contactId,
@@ -399,65 +384,111 @@ serve(async (req: Request) => {
     if (orgId) upsertPayload.organization_id = orgId
     if (sendpulseAccountId) upsertPayload.sendpulse_account_id = sendpulseAccountId
 
-    const { data: convData, error: convErr } = await supabase
-      .from('conversations')
-      .upsert([upsertPayload], { onConflict: 'sendpulse_conversation_id', ignoreDuplicates: false })
-      .select()
-      .limit(1)
-      .single()
+    const [convResult, b24Result, mediaResult] = await Promise.all([
 
-    if (convErr) console.error('[webhook] conversation upsert error:', JSON.stringify(convErr))
-    else console.log(`[webhook] conversation id=${convData?.id} org=${convData?.organization_id}`)
-    const conversation = convData
+      // a) Conversation upsert
+      supabase.from('conversations')
+        .upsert([upsertPayload], { onConflict: 'sendpulse_conversation_id', ignoreDuplicates: false })
+        .select().limit(1).single()
+        .then(({ data, error }) => {
+          if (error) console.error('[webhook] conversation upsert error:', JSON.stringify(error))
+          else console.log(`[webhook] conversation id=${data?.id} org=${data?.organization_id}`)
+          return data
+        }),
 
-    // Increment unread count
-    if (conversation?.id) {
-      const { data: cur } = await supabase.from('conversations').select('unread_count').eq('id', conversation.id).single()
-      await supabase.from('conversations').update({ unread_count: (cur?.unread_count || 0) + 1 }).eq('id', conversation.id)
-    }
-
-    // Insert message
-    if (effectiveText || finalMediaUrl) {
-      const { error: msgErr } = await supabase.from('messages').insert([{
-        conversation_id: conversation?.id || null,
-        sendpulse_message_id: messageId || null,
-        sender_name: contactName,
-        message_text: messageText || null,
-        message_type: msgType,
-        media_url: finalMediaUrl || null,
-        media_name: mediaFilename || null,
-        direction,
-        channel,
-        sent_at: new Date().toISOString(),
-      }])
-      if (msgErr) console.error('[webhook] message insert error:', JSON.stringify(msgErr))
-    }
-
-    // Optionally forward to Bitrix24 if this bot is mapped to an open channel
-    if (conversation?.id && botId) {
-      const { data: channelCfgs } = await supabase
-        .from('bitrix24_open_channels')
-        .select('*')
-        .eq('sendpulse_bot_id', botId)
-        .limit(1)
-      const channelCfg = channelCfgs?.[0]
-
-      if (channelCfg?.bitrix24_account_id) {
-        const { data: bxAccounts } = await supabase
-          .from('bitrix24_accounts')
-          .select('*')
-          .eq('id', channelCfg.bitrix24_account_id)
-          .limit(1)
-        const bxAccount = bxAccounts?.[0]
-        if (bxAccount) {
-          try {
-            await sendToBitrix24(bxAccount, channelCfg, conversation, messageText, messageId, msgType, mediaUrl, mediaFilename, contactPhone)
-          } catch (bxErr: any) {
-            console.error('Bitrix24 forward error:', bxErr)
-          }
+      // b) Bitrix24 channel + account lookup
+      (async () => {
+        if (!botUuid) return { channelCfg: null, bxAccount: null }
+        const { data: cfgs } = await supabase.from('bitrix24_open_channels').select('*').eq('sendpulse_bot_id', botUuid).limit(1)
+        const channelCfg = cfgs?.[0] || null
+        if (!channelCfg?.bitrix24_account_id) {
+          if (!channelCfg) console.log(`[webhook] no b24 channel mapped to botUuid=${botUuid}`)
+          return { channelCfg, bxAccount: null }
         }
-      }
+        const { data: accs } = await supabase.from('bitrix24_accounts').select('*').eq('id', channelCfg.bitrix24_account_id).limit(1)
+        return { channelCfg, bxAccount: accs?.[0] || null }
+      })(),
+
+      // c) Media re-hosting (only for media messages)
+      (async () => {
+        if (!isMediaMsg || (!mediaUrl && !(messageId && platformMediaId))) return { url: mediaUrl, filename: mediaFilename }
+        try {
+          let spToken: string | null = null
+          if (sendpulseAccountId) {
+            const { data: accRow } = await supabase.from('sendpulse_accounts')
+              .select('access_token, token_expires_at, client_id, client_secret')
+              .eq('id', sendpulseAccountId).single()
+            if (accRow) {
+              if (accRow.access_token && accRow.token_expires_at && new Date(accRow.token_expires_at) > new Date(Date.now() + 60000)) {
+                spToken = accRow.access_token
+              } else if (accRow.client_id && accRow.client_secret) {
+                const tr = await fetch('https://api.sendpulse.com/oauth/access_token', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ grant_type: 'client_credentials', client_id: accRow.client_id, client_secret: accRow.client_secret }),
+                })
+                const td = await tr.json()
+                if (td?.access_token) {
+                  spToken = td.access_token
+                  await supabase.from('sendpulse_accounts').update({
+                    access_token: td.access_token,
+                    token_expires_at: new Date(Date.now() + (td.expires_in || 3600) * 1000).toISOString(),
+                  }).eq('id', sendpulseAccountId)
+                }
+              }
+            }
+          }
+          return await reHostMedia({ channel, spMessageId: messageId, platformMediaId, fallbackUrl: mediaUrl, filename: mediaFilename, msgType, spToken })
+        } catch (e: any) {
+          console.error('[webhook] reHostMedia failed, using original URL:', e.message)
+          return { url: mediaUrl, filename: mediaFilename }
+        }
+      })(),
+    ])
+
+    const conversation = convResult
+    const { channelCfg, bxAccount } = b24Result
+    const finalMediaUrl = mediaResult.url
+    const effectiveFilename = mediaResult.filename
+
+    // ── Phase 3: message insert + unread + Bitrix24 forward in parallel ─────
+    const tasks: Promise<any>[] = []
+
+    if (effectiveText || finalMediaUrl) {
+      tasks.push(
+        supabase.from('messages').insert([{
+          conversation_id: conversation?.id || null,
+          sendpulse_message_id: messageId || null,
+          sender_name: contactName,
+          message_text: messageText || null,
+          message_type: msgType,
+          media_url: finalMediaUrl || null,
+          media_name: effectiveFilename || null,
+          direction,
+          channel,
+          sent_at: new Date().toISOString(),
+        }]).then(({ error: msgErr }) => {
+          if (msgErr) console.error('[webhook] message insert error:', JSON.stringify(msgErr))
+        })
+      )
     }
+
+    if (conversation?.id) {
+      tasks.push(
+        supabase.from('conversations').select('unread_count').eq('id', conversation.id).single()
+          .then(({ data: cur }) =>
+            supabase.from('conversations').update({ unread_count: (cur?.unread_count || 0) + 1 }).eq('id', conversation.id)
+          )
+      )
+    }
+
+    if (conversation?.id && bxAccount && channelCfg) {
+      tasks.push(
+        sendToBitrix24(bxAccount, channelCfg, conversation, messageText, messageId, msgType, finalMediaUrl, effectiveFilename, contactPhone)
+          .catch((bxErr: any) => console.error('[webhook] Bitrix24 forward error:', bxErr))
+      )
+    }
+
+    await Promise.all(tasks)
 
     return json({ success: true, conversation_id: conversation?.id })
   } catch (err: any) {

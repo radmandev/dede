@@ -46,6 +46,23 @@ serve(async (req: Request) => {
         continue
       }
 
+      // imconnector.register — re-register with correct PLACEMENT_HANDLER
+      const connectorId = account.member_id ? `whatsapp_sp_${account.member_id.substring(0, 10)}` : 'whatsapp_sendpulse'
+      await callBitrix(endpoint, token, 'imconnector.register', {
+        ID: connectorId,
+        NAME: 'WhatsApp (SendPulse)',
+        PLACEMENT_HANDLER: installerUrl,
+      })
+
+      // ONIMCONNECTORMESSAGEADD event — rebind outgoing message handler
+      const existingEventsRes = await callBitrix(endpoint, token, 'event.get', {})
+      const existingHandlers = Array.isArray(existingEventsRes?.result) ? existingEventsRes.result : []
+      for (const h of existingHandlers.filter((h: any) => h.event === 'ONIMCONNECTORMESSAGEADD')) {
+        await callBitrix(endpoint, token, 'event.unbind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: h.handler })
+      }
+      const eventBind = await callBitrix(endpoint, token, 'event.bind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: handlerUrl })
+      console.log(`[rebind] event.bind for ${account.name}:`, JSON.stringify(eventBind))
+
       // CONTACT_CENTER placement
       await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'CONTACT_CENTER', HANDLER: installerUrl })
       const ccBind = await callBitrix(endpoint, token, 'placement.bind', {
@@ -78,6 +95,7 @@ serve(async (req: Request) => {
         dashboardUrl,
         left_menu: lmBind?.result === true ? '✓' : (lmBind?.error_description || lmBind?.error || '?'),
         contact_center: ccBind?.result === true ? '✓' : (ccBind?.error_description || ccBind?.error || '?'),
+        event_handler: eventBind?.result === true ? '✓' : (eventBind?.error_description || eventBind?.error || '?'),
       })
     }
 
