@@ -60,8 +60,23 @@ async function reHostMedia(opts: {
       .from('attachments')
       .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
     if (error) throw error
-    const url = supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
-    return { url, filename: finalName }
+
+    // Check if the public URL is accessible — if the bucket isn't public, fall back to a signed URL
+    const publicUrl = supabase.storage.from('attachments').getPublicUrl(storagePath).data?.publicUrl || ''
+    try {
+      const probe = await fetch(publicUrl, { method: 'HEAD' })
+      if (probe.ok) {
+        console.log(`[media] public URL accessible: ${publicUrl}`)
+        return { url: publicUrl, filename: finalName }
+      }
+      console.warn(`[media] public URL returned ${probe.status} — generating signed URL`)
+    } catch (e: any) { console.warn('[media] public URL probe failed:', e.message) }
+
+    // Bucket is private — use a 7-day signed URL so Bitrix24 can download it
+    const { data: signed, error: signErr } = await supabase.storage.from('attachments').createSignedUrl(storagePath, 604800)
+    if (signErr || !signed?.signedUrl) throw new Error('Failed to create signed URL: ' + signErr?.message)
+    console.log(`[media] using signed URL (7d): ${signed.signedUrl}`)
+    return { url: signed.signedUrl, filename: finalName }
   }
 
   // Strategy 1: SendPulse media proxy (authenticated)
@@ -172,6 +187,7 @@ async function sendToBitrix24(
     // Ensure filename has an extension so Bitrix24 can identify the media type
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
+    console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 80)}`)
     messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
 
