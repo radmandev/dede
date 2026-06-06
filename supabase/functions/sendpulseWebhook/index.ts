@@ -205,34 +205,36 @@ async function sendToBitrix24(
   const unixNow = Math.floor(Date.now() / 1000)
   const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
 
+  // Phone: prefer current message phone, fallback to conversation record
+  const phone = contactPhone || conversation.contact_phone || ''
+
+  const msgItem: any = {
+    user: {
+      id: String(conversation.sendpulse_contact_id),
+      name: conversation.contact_name || 'Customer',
+      phone,
+      avatar: '',
+      online: true,
+    },
+    message: messageObj,
+    chat: { id: String(conversation.sendpulse_contact_id) },
+  }
+
   if (mediaUrl) {
     const isImage = msgType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaFilename || '')
     const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
     const fileType = isImage ? 'IMAGE' : isAudio ? 'AUDIO' : 'DOCUMENT'
-    // Ensure filename has an extension so Bitrix24 can identify the media type
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 80)}`)
-    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
+    // FILES must be a sibling of `message` in the MESSAGES item, not nested inside message
+    msgItem.files = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
-
-  // Phone: prefer current message phone, fallback to conversation record
-  const phone = contactPhone || conversation.contact_phone || ''
 
   const payload = {
     CONNECTOR: CONNECTOR_ID,
     LINE: LINE_ID,
-    MESSAGES: [{
-      user: {
-        id: String(conversation.sendpulse_contact_id),
-        name: conversation.contact_name || 'Customer',
-        phone,
-        avatar: '',
-        online: true,
-      },
-      message: messageObj,
-      chat: { id: String(conversation.sendpulse_contact_id) },
-    }],
+    MESSAGES: [msgItem],
   }
 
   const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
