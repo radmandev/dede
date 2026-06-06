@@ -79,24 +79,49 @@ async function reHostMedia(opts: {
     return { url: signed.signedUrl, filename: finalName }
   }
 
-  // Strategy 1: SendPulse media proxy (authenticated)
-  if (spToken && spMessageId) {
-    const channelSlug = channel === 'live_chat' ? 'live-chat' : channel
-    const idParam = platformMediaId ? `&id=${encodeURIComponent(platformMediaId)}` : ''
-    const proxyUrl = `https://login.sendpulse.com/api/chatbots-service/${channelSlug}/messages/media?message_id=${spMessageId}${idParam}`
+  const channelSlug = channel === 'live_chat' ? 'live-chat' : channel
+  const spBase = `https://login.sendpulse.com/api/chatbots-service/${channelSlug}/messages/media`
+
+  async function tryFetch(label: string, url: string, headers: Record<string, string> = {}): Promise<{ buf: ArrayBuffer; ct: string } | null> {
     try {
-      const res = await fetch(proxyUrl, { headers: { Authorization: `Bearer ${spToken}` } })
-      if (res.ok) return await uploadBuffer(await res.arrayBuffer(), res.headers.get('content-type') || 'application/octet-stream')
-      console.log(`[media] proxy ${proxyUrl} → ${res.status}`)
-    } catch (e: any) { console.error('[media] proxy fetch error:', e.message) }
+      const res = await fetch(url, { headers })
+      console.log(`[media] ${label} → ${res.status}`)
+      if (res.ok) return { buf: await res.arrayBuffer(), ct: res.headers.get('content-type') || 'application/octet-stream' }
+    } catch (e: any) { console.error(`[media] ${label} error:`, e.message) }
+    return null
   }
 
-  // Strategy 2: direct URL (public CDN)
+  const spAuthHeader = spToken ? { Authorization: `Bearer ${spToken}` } : {}
+
+  // Strategy A: fallbackUrl exactly as SP provided it, with auth (avoids extra params we might be adding)
+  if (spToken && fallbackUrl && fallbackUrl.includes('sendpulse.com')) {
+    const r = await tryFetch('sp-url-with-auth', fallbackUrl, spAuthHeader)
+    if (r) return await uploadBuffer(r.buf, r.ct)
+  }
+
+  // Strategy B: media ID only (no message_id) — simplest possible SP proxy call
+  if (spToken && platformMediaId) {
+    const r = await tryFetch('sp-id-only', `${spBase}?id=${encodeURIComponent(platformMediaId)}`, spAuthHeader)
+    if (r) return await uploadBuffer(r.buf, r.ct)
+  }
+
+  // Strategy C: message_id only (no &id param — avoids double-param 422)
+  if (spToken && spMessageId) {
+    const r = await tryFetch('sp-msgid-only', `${spBase}?message_id=${encodeURIComponent(spMessageId)}`, spAuthHeader)
+    if (r) return await uploadBuffer(r.buf, r.ct)
+  }
+
+  // Strategy D: message_id + id (original attempt)
+  if (spToken && spMessageId) {
+    const idParam = platformMediaId ? `&id=${encodeURIComponent(platformMediaId)}` : ''
+    const r = await tryFetch('sp-msgid-and-id', `${spBase}?message_id=${encodeURIComponent(spMessageId)}${idParam}`, spAuthHeader)
+    if (r) return await uploadBuffer(r.buf, r.ct)
+  }
+
+  // Strategy E: direct URL without auth (public CDN fallback)
   if (fallbackUrl) {
-    try {
-      const res = await fetch(encodeURI(decodeURI(fallbackUrl)))
-      if (res.ok) return await uploadBuffer(await res.arrayBuffer(), res.headers.get('content-type') || 'application/octet-stream')
-    } catch (e: any) { console.error('[media] direct fetch error:', e.message) }
+    const r = await tryFetch('direct-no-auth', encodeURI(decodeURI(fallbackUrl)))
+    if (r) return await uploadBuffer(r.buf, r.ct)
   }
 
   throw new Error('all media fetch strategies failed')
