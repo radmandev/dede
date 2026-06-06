@@ -227,8 +227,11 @@ async function sendToBitrix24(
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 80)}`)
-    // FILES must be a sibling of `message` in the MESSAGES item, not nested inside message
-    msgItem.files = { '0': { link: mediaUrl, name: fname, type: fileType } }
+    // Use filename as text so message.text is never empty for media (Bitrix24 may require non-empty)
+    if (!messageObj.text) messageObj.text = fname
+    // Try both FILES locations: inside message AND as sibling (Bitrix24 API varies by version)
+    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
+    msgItem.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
 
   const payload = {
@@ -237,6 +240,7 @@ async function sendToBitrix24(
     MESSAGES: [msgItem],
   }
 
+  if (mediaUrl) console.log('[b24] full payload:', JSON.stringify(payload))
   const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
