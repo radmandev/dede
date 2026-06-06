@@ -1,58 +1,40 @@
 import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
+import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Zap, ZapOff, Server, Radio, RefreshCw } from "lucide-react";
+import { Trash2, Zap, ZapOff, Server, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
 
 function OpenChannelsList({ accountId }) {
-  const [lines, setLines] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const fetchLines = async () => {
-    setLoading(true);
-    try {
-      const res = await base44.functions.invoke("bitrix24ListLines", { bitrix24_account_id: accountId });
-      if (res.data?.error) throw new Error(res.data.error);
-      setLines(res.data?.lines || []);
-    } catch (e) {
-      toast.error("Failed to fetch channels: " + e.message);
-      setLines([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (lines === null) {
-    return (
-      <Button size="sm" variant="outline" onClick={fetchLines} disabled={loading} className="gap-1.5 mt-2">
-        {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Radio className="h-3.5 w-3.5" />}
-        View Open Channels
-      </Button>
-    );
-  }
+  const { data: channels = [], isLoading } = useQuery({
+    queryKey: ["openChannelsByAccount", accountId],
+    queryFn: () => base44.entities.Bitrix24OpenChannel.filter({ bitrix24_account_id: accountId }),
+    enabled: !!accountId,
+  });
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Open Channels</p>
-        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={fetchLines} disabled={loading}>
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
-      {lines.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No open channels found in this portal.</p>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Open Channels</p>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <RefreshCw className="h-3 w-3 animate-spin" /> Loading…
+        </div>
+      ) : channels.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No open channels configured yet. Go to the{" "}
+          <span className="font-medium text-foreground">Open Channels</span> page to add one, or open this connector from inside a Bitrix24 open line to auto-create it.
+        </p>
       ) : (
-        lines.map((line) => (
-          <div key={line.id} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
+        channels.map((ch) => (
+          <div key={ch.id} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">{line.name}</p>
-              <p className="text-xs text-muted-foreground font-mono">Line ID: {line.id}</p>
+              <p className="text-sm font-medium">{ch.name}</p>
+              <p className="text-xs text-muted-foreground font-mono">Line ID: {ch.bitrix24_line_id || "—"}</p>
             </div>
-            <Badge variant="secondary" className="text-xs">Open Channel</Badge>
+            <Badge variant="secondary" className="text-xs capitalize">{ch.channel || "channel"}</Badge>
           </div>
         ))
       )}
@@ -62,6 +44,8 @@ function OpenChannelsList({ accountId }) {
 
 export default function Bitrix24Accounts() {
   const queryClient = useQueryClient();
+  const { currentMembership } = useAuth();
+  const orgId = currentMembership?.organization_id;
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ["bitrix24Accounts"],
@@ -76,8 +60,10 @@ export default function Bitrix24Accounts() {
       if (!authUid) return;
       const { data: profile } = await supabase.from("profiles").select("id").eq("auth_uid", authUid).limit(1).single();
       if (!profile?.id) return;
-      await supabase.from("bitrix24_accounts").update({ owner_id: profile.id }).eq("id", accountId).is("owner_id", null);
-      await supabase.from("bitrix24_open_channels").update({ owner_id: profile.id }).eq("bitrix24_account_id", accountId).is("owner_id", null);
+      const update = { owner_id: profile.id };
+      if (orgId) update.organization_id = orgId;
+      await supabase.from("bitrix24_accounts").update(update).eq("id", accountId).is("owner_id", null);
+      await supabase.from("bitrix24_open_channels").update(update).eq("bitrix24_account_id", accountId).is("owner_id", null);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["bitrix24Accounts"] }),
   });

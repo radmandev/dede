@@ -1,0 +1,2 @@
+[functions.getInvitationInfo]
+verify_jwt = false

@@ -13,6 +13,8 @@ export function withServiceKey(serviceKey) {
 }
 
 let cachedProfileId = null;
+let cachedOrgId = null;
+
 async function getCurrentProfileId() {
   if (cachedProfileId) return cachedProfileId;
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -25,11 +27,40 @@ async function getCurrentProfileId() {
   return cachedProfileId;
 }
 
+async function getCurrentOrgId() {
+  if (cachedOrgId) return cachedOrgId;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const user = sessionData?.session?.user;
+  if (!user) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('auth_uid', user.id)
+    .single();
+  cachedOrgId = data?.organization_id || null;
+  return cachedOrgId;
+}
+
+export function clearCache() {
+  cachedProfileId = null;
+  cachedOrgId = null;
+}
+
 const ownerAwareTables = new Set([
   'conversations',
   'sendpulse_accounts',
   'bitrix24_accounts',
   'bitrix24_open_channels',
+  'sendpulse_bots',
+  'templates',
+  'attachments',
+]);
+
+const orgAwareTables = new Set([
+  'sendpulse_accounts',
+  'bitrix24_accounts',
+  'bitrix24_open_channels',
+  'conversations',
   'sendpulse_bots',
   'templates',
   'attachments',
@@ -86,6 +117,10 @@ function createEntity(tableName) {
         const profileId = await getCurrentProfileId();
         if (profileId) payload.owner_id = profileId;
       }
+      if (orgAwareTables.has(tableName) && !payload.organization_id) {
+        const orgId = await getCurrentOrgId();
+        if (orgId) payload.organization_id = orgId;
+      }
       const { data, error } = await supabase.from(tableName).insert([payload]).select().limit(1).single();
       if (error) throw error;
       return data;
@@ -112,6 +147,9 @@ const entityTableMap = {
   SendPulseBot: 'sendpulse_bots',
   GlobalConfig: 'global_config',
   AppConfig: 'app_config',
+  Organization: 'organizations',
+  OrganizationMember: 'organization_members',
+  Invitation: 'invitations',
 };
 
 export const base44 = {
@@ -122,6 +160,7 @@ export const base44 = {
       return data.user;
     },
     async logout(redirectUrl) {
+      clearCache();
       await supabase.auth.signOut();
       if (redirectUrl) {
         window.location.href = redirectUrl;
@@ -171,7 +210,6 @@ export const base44 = {
       };
       const { data, error } = await supabase.functions.invoke(functionName, options);
       if (error) throw error;
-      // Wrap response to maintain compatibility with frontend expectations
       return { data: data || {} };
     },
   },

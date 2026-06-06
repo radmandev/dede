@@ -31,14 +31,44 @@ serve(async (req: Request) => {
     const token = await ensureBitrixToken(supabase, account)
     if (!token) return makeJsonResponse({ error: 'No valid token for this account' }, 400)
 
-    const result = await callBitrix(account.domain, token, 'imopenlines.config.list.get', {})
-    const raw = Array.isArray(result?.result) ? result.result : []
-    const lines = raw
-      .map((line) => ({
-        id: String(line.ID || line.id || ''),
-        name: line.LINE_NAME || line.NAME || `Line ${line.ID || line.id || '?'}`,
-      }))
-      .filter((l) => l.id)
+    // imopenlines.config.list requires the 'imopenlines' scope.
+    // If the app lacks it, fall back to lines already captured in our DB.
+    const result = await callBitrix(account.domain, token, 'imopenlines.config.list', {})
+
+    let lines: { id: string; name: string }[] = []
+
+    if (!result?.error) {
+      let raw: any[] = []
+      if (Array.isArray(result?.result)) {
+        raw = result.result
+      } else if (Array.isArray(result?.result?.items)) {
+        raw = result.result.items
+      } else if (Array.isArray(result?.result?.lines)) {
+        raw = result.result.lines
+      }
+      lines = raw
+        .map((line: any) => ({
+          id: String(line.ID || line.id || ''),
+          name: line.LINE_NAME || line.NAME || `Line ${line.ID || line.id || '?'}`,
+        }))
+        .filter((l) => l.id)
+    }
+
+    // Fallback: read lines captured in our DB when CONTACT_CENTER placement fired
+    if (lines.length === 0) {
+      const { data: dbChannels } = await supabase
+        .from('bitrix24_open_channels')
+        .select('bitrix24_line_id, name')
+        .eq('bitrix24_account_id', bitrix24_account_id)
+        .not('bitrix24_line_id', 'is', null)
+
+      lines = (dbChannels || [])
+        .filter((ch: any) => ch.bitrix24_line_id)
+        .map((ch: any) => ({
+          id: String(ch.bitrix24_line_id),
+          name: ch.name || `Line ${ch.bitrix24_line_id}`,
+        }))
+    }
 
     return makeJsonResponse({ lines })
   } catch (error) {

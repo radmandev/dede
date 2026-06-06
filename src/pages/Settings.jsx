@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Copy, Check, Save, Settings as SettingsIcon, Webhook, Loader2 } from "lucide-react";
+import { Copy, Check, Save, Settings as SettingsIcon, Webhook, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -45,6 +45,17 @@ export default function Settings() {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://joiodrhhvhxmushujxze.supabase.co';
   const installerUrl = `${supabaseUrl}/functions/v1/bitrix24Installer`;
   const handlerUrl = `${supabaseUrl}/functions/v1/bitrix24Handler`;
+
+  const rebindPlacements = useMutation({
+    mutationFn: () => base44.functions.invoke("bitrix24RebindPlacements", {}),
+    onSuccess: (res) => {
+      const results = res?.data?.results || [];
+      const okCount = results.filter((r) => r.ok).length;
+      if (okCount > 0) toast.success(`Placements re-registered on ${okCount} portal(s).`);
+      else toast.error(res?.data?.error || "Could not re-register placements.");
+    },
+    onError: (e) => toast.error(e?.message || "Failed to re-register placements."),
+  });
 
   const bindWebhook = useMutation({
     mutationFn: () => base44.functions.invoke("bitrix24BindReplyWebhook", {}),
@@ -135,6 +146,30 @@ export default function Settings() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">When a portal installs the app, its account and a default Open Channel are created automatically. Then map the channel to a SendPulse account under <strong>Open Channels</strong>.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><RefreshCw className="h-4 w-4" /> Re-register Bitrix24 Placements</CardTitle>
+            <CardDescription>Re-registers the LEFT_MENU app link, Contact Center connector, and CRM tabs across all connected portals using the current App Production URL. Run this if the app stopped appearing or is showing an auth error inside Bitrix24.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => rebindPlacements.mutate()} disabled={rebindPlacements.isPending} className="gap-2">
+              {rebindPlacements.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {rebindPlacements.isPending ? "Re-registering..." : "Re-register Placements"}
+            </Button>
+            {rebindPlacements.data?.data?.results && (
+              <div className="mt-3 space-y-1">
+                {rebindPlacements.data.data.results.map((r, i) => (
+                  <div key={i} className="text-xs flex items-center gap-2">
+                    {r.ok ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <span className="text-destructive">✕</span>}
+                    <span className="font-medium">{r.account}</span>
+                    <span className="text-muted-foreground">left_menu: {r.left_menu} · contact_center: {r.contact_center}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

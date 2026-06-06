@@ -1,102 +1,86 @@
 import { Link, useLocation } from "react-router-dom";
 import { Outlet } from "react-router-dom";
-import { base44 } from "@/api/base44Client";
-import { MessageSquare, Settings, Send, Server, Cable, LogOut, ShieldCheck } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
+import { MessageSquare, Settings, Send, Server, Cable, LogOut, ShieldCheck, Users, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
+const NAV_ITEMS = [
+  { to: "/", icon: MessageSquare, label: "Inbox", exact: true },
+  { to: "/sendpulse-accounts", icon: Send, label: "SendPulse Accounts" },
+  { to: "/bitrix24-accounts", icon: Server, label: "Bitrix24 Accounts" },
+  { to: "/channels", icon: Cable, label: "Open Channels" },
+  { to: "/team", icon: Users, label: "Team" },
+  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/admin-queue", icon: ShieldCheck, label: "Admin Queue" },
+];
+
 export default function DashboardLayout() {
   const location = useLocation();
+  const { logout, currentOrg, user } = useAuth();
+
+  const isActive = (item) =>
+    item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
+
+  // Org initials for the logo
+  const orgInitials = currentOrg?.name
+    ? currentOrg.name.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2)
+    : "?";
 
   return (
     <div className="h-screen flex font-inter">
       {/* Slim sidebar */}
       <div className="w-16 bg-sidebar flex flex-col items-center py-4 border-r border-sidebar-border">
-        <div className="mb-8">
-          <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center">
-            <MessageSquare className="h-5 w-5 text-primary-foreground" />
-          </div>
-        </div>
-
         <TooltipProvider delayDuration={100}>
+        {/* Org logo / initials */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="mb-8 h-9 w-9 rounded-xl bg-primary flex items-center justify-center cursor-default select-none">
+              {orgInitials.length > 1 ? (
+                <span className="text-xs font-bold text-primary-foreground">{orgInitials}</span>
+              ) : (
+                <Building2 className="h-5 w-5 text-primary-foreground" />
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right">{currentOrg?.name || "Workspace"}</TooltipContent>
+        </Tooltip>
+
           <nav className="flex flex-col gap-2 flex-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`h-10 w-10 rounded-xl ${location.pathname === "/" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}
-                  >
-                    <MessageSquare className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">Inbox</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/sendpulse-accounts">
-                  <Button variant="ghost" size="icon" className={`h-10 w-10 rounded-xl ${location.pathname === "/sendpulse-accounts" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
-                    <Send className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">SendPulse Accounts</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/bitrix24-accounts">
-                  <Button variant="ghost" size="icon" className={`h-10 w-10 rounded-xl ${location.pathname === "/bitrix24-accounts" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
-                    <Server className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">Bitrix24 Accounts</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/channels">
-                  <Button variant="ghost" size="icon" className={`h-10 w-10 rounded-xl ${location.pathname === "/channels" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
-                    <Cable className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">Open Channels</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/settings">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`h-10 w-10 rounded-xl ${location.pathname === "/settings" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}
-                  >
-                    <Settings className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">Settings</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link to="/admin-queue">
-                  <Button variant="ghost" size="icon" className={`h-10 w-10 rounded-xl ${location.pathname === "/admin-queue" ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
-                    <ShieldCheck className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">Admin Queue</TooltipContent>
-            </Tooltip>
+            {NAV_ITEMS.map(({ to, icon: Icon, label, exact }) => (
+              <Tooltip key={to}>
+                <TooltipTrigger asChild>
+                  <Link to={to}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`h-10 w-10 rounded-xl ${
+                        isActive({ to, exact })
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </Button>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
+            ))}
           </nav>
 
-          {/* Bottom actions */}
+          {/* Bottom: user avatar + logout */}
           <div className="mt-auto flex flex-col gap-2 items-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center cursor-default select-none border border-sidebar-border">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">
+                    {(user?.email || "U").charAt(0)}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right">{user?.email}</TooltipContent>
+            </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -104,7 +88,7 @@ export default function DashboardLayout() {
                   variant="ghost"
                   size="icon"
                   className="h-10 w-10 rounded-xl text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
-                  onClick={() => base44.auth.logout()}
+                  onClick={() => logout()}
                 >
                   <LogOut className="h-5 w-5" />
                 </Button>

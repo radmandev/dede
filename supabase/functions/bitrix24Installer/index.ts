@@ -34,17 +34,44 @@ tryAction();
 </html>`
 }
 
-function embedHtml(appBaseUrl, path) {
-  const src = `${appBaseUrl}${path}`
+function contactCenterHtml(lineId: string, connectorId: string, dashboardUrl: string) {
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>WhatsApp (SendPulse)</title>
-<style>html,body{margin:0;height:100%;}iframe{border:0;width:100%;height:100vh;display:block;}</style>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fa;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.08);padding:32px 28px;max-width:420px;width:100%;text-align:center;}
+.icon{width:56px;height:56px;background:#25D366;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;}
+.icon svg{width:32px;height:32px;fill:#fff;}
+h2{font-size:18px;font-weight:600;color:#1a1a2e;margin-bottom:8px;}
+p{font-size:13px;color:#666;line-height:1.5;margin-bottom:6px;}
+.line-id{font-family:monospace;background:#f0f4f8;border-radius:6px;padding:6px 10px;font-size:12px;color:#444;margin:12px 0;}
+.btn{display:inline-block;margin-top:20px;padding:10px 24px;background:#25D366;color:#fff;border-radius:8px;font-size:14px;font-weight:500;text-decoration:none;cursor:pointer;border:none;}
+.note{font-size:11px;color:#999;margin-top:14px;}
+</style>
 </head>
 <body>
-<iframe src="${src}" allow="clipboard-write; microphone; camera"></iframe>
+<div class="card">
+  <div class="icon"><svg viewBox="0 0 48 48"><path d="M24 8C15 8 8 15 8 24c0 3 .8 5.8 2.2 8.2L10 40l8.1-2.1C20.2 39 22 39.5 24 39.5c9 0 16-7 16-16S33 8 24 8zm0 28c-2 0-3.9-.6-5.5-1.7l-.3-.2-4.8 1.2 1.3-4.7-.2-.3C13.5 28.6 13 26.3 13 24c0-6.1 4.9-11 11-11s11 4.9 11 11-4.9 11-11 11z"/></svg></div>
+  <h2>WhatsApp (SendPulse) Connected</h2>
+  <p>This open line has been linked to your connector.</p>
+  ${lineId ? `<div class="line-id">Line ID: ${lineId}</div>` : ''}
+  <p>To complete setup, open the dashboard and map this line to a SendPulse bot under <strong>Open Channels</strong>.</p>
+  ${dashboardUrl ? `<a class="btn" href="${dashboardUrl}" target="_blank">Open Dashboard</a>` : ''}
+  <p class="note">You can close this window.</p>
+</div>
 <script src="//api.bitrix24.com/api/v1/"></script>
-<script>function f(){if(typeof BX24!=='undefined'){BX24.init(function(){if(BX24.fitWindow)BX24.fitWindow();});}else{setTimeout(f,200);}}f();</script>
+<script>
+function f(){
+  if(typeof BX24!=='undefined'){
+    BX24.init(function(){
+      if(BX24.fitWindow) BX24.fitWindow();
+    });
+  } else { setTimeout(f,200); }
+}
+f();
+</script>
 </body>
 </html>`
 }
@@ -89,12 +116,16 @@ serve(async (req: Request) => {
     const { data: configs = [] } = await supabase.from('global_config').select('*').limit(1)
     const globalConfig = normalizeConfigRow(configs?.[0])
     const rawBaseUrl = globalConfig.app_base_url || ''
-    const appBaseUrl = rawBaseUrl.replace(/^https:\/\/preview--/, 'https://')
+    const appBaseUrl = rawBaseUrl.replace(/^https:\/\/preview--/, 'https://').replace(/\/+$/, '')
     const functionsBase = `${SUPABASE_URL}/functions/v1`
     const installerUrl = `${functionsBase}/bitrix24Installer`
     const handlerUrl = `${functionsBase}/bitrix24Handler`
-    const dashboardUrl = appBaseUrl ? `${appBaseUrl}/` : ''
-    const crmChatUrl = appBaseUrl ? `${appBaseUrl}/` : ''
+    // Guard: never use a Supabase functions URL as the dashboard/CRM handler —
+    // those URLs require auth headers and will show the auth error inside Bitrix24.
+    const isValidAppUrl = appBaseUrl && !appBaseUrl.includes('/functions/v1')
+    console.log('installer appBaseUrl:', appBaseUrl, 'isValid:', isValidAppUrl)
+    const dashboardUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
+    const crmChatUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
 
     let account = null
     if (memberId) {
@@ -188,12 +219,24 @@ serve(async (req: Request) => {
 
         const { data: existingChannels = [] } = await supabase.from('bitrix24_open_channels').select('*').eq('bitrix24_account_id', account?.id).eq('bitrix24_line_id', lineId).limit(1)
         if (!existingChannels.length) {
-          await supabase.from('bitrix24_open_channels').insert([{ owner_id: account?.owner_id || null, name: `${account?.name || 'Portal'} — Line ${lineId}`, bitrix24_account_id: account?.id, sendpulse_account_id: '', bitrix24_line_id: lineId, bitrix24_connector_id: connectorId, channel: 'whatsapp', status: 'active' }])
+          const insertRes = await supabase.from('bitrix24_open_channels').insert([{ owner_id: account?.owner_id || null, name: `${account?.name || 'Portal'} — Line ${lineId}`, bitrix24_account_id: account?.id, sendpulse_account_id: null, bitrix24_line_id: lineId, bitrix24_connector_id: connectorId, channel: 'whatsapp', status: 'active' }])
+      if (insertRes.error) console.error('insert open channel error:', insertRes.error)
         }
       }
     }
 
-    const finalHtml = placement !== 'DEFAULT' && appBaseUrl ? embedHtml(appBaseUrl, '/') : makeHtml(placement)
+    let finalHtml: string
+    if (placement === 'CONTACT_CENTER') {
+      const capturedLineId = (() => {
+        try {
+          const opts = JSON.parse(data.PLACEMENT_OPTIONS || '{}')
+          return String(opts.LINE || opts.CONNECTOR_LINE || opts.ACTIVE_LINE || '')
+        } catch { return '' }
+      })()
+      finalHtml = contactCenterHtml(capturedLineId, connectorId, dashboardUrl)
+    } else {
+      finalHtml = makeHtml(placement)
+    }
     return new Response(finalHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   } catch (error) {
     console.error('bitrix24Installer error:', error)

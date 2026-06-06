@@ -15,6 +15,8 @@ export default function Register() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const nextUrl = new URLSearchParams(window.location.search).get("next") || "/";
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -25,7 +27,7 @@ export default function Register() {
     setLoading(true);
     try {
       await base44.auth.register({ email, password });
-      window.location.href = "/";
+      window.location.href = nextUrl;
     } catch (err) {
       setError(err.message || "Registration failed");
     } finally {
@@ -34,7 +36,7 @@ export default function Register() {
   };
 
   const handleGoogle = () => {
-    base44.auth.loginWithProvider("google", "/");
+    base44.auth.loginWithProvider("google", nextUrl);
   };
 
   return (
