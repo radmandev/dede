@@ -9,7 +9,19 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 const WA_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%2325D366'/%3E%3Cpath fill='%23fff' d='M24 8C15 8 8 15 8 24c0 3 .8 5.8 2.2 8.2L10 40l8.1-2.1C20.2 39 22 39.5 24 39.5c9 0 16-7 16-16S33 8 24 8zm0 28c-2 0-3.9-.6-5.5-1.7l-.3-.2-4.8 1.2 1.3-4.7-.2-.3C13.5 28.6 13 26.3 13 24c0-6.1 4.9-11 11-11s11 4.9 11 11-4.9 11-11 11z'/%3E%3C/svg%3E"
 
-function makeHtml(placement, dashboardUrl = '') {
+// Bitrix24 sends SETTING_CONNECTOR (not CONTACT_CENTER) when configuring a connector in an open line
+const CONNECTOR_PLACEMENTS = ['CONTACT_CENTER', 'SETTING_CONNECTOR']
+
+function isConnectorPlacement(placement: string) {
+  return CONNECTOR_PLACEMENTS.includes(placement)
+}
+
+function parsePlacementOptions(raw: any): any {
+  if (raw && typeof raw === 'object') return raw
+  try { return JSON.parse(raw || '{}') } catch { return {} }
+}
+
+function makeHtml(placement: string, dashboardUrl = '') {
   const jsAction = placement === 'DEFAULT'
     ? `BX24.init(function() { BX24.installFinish(); });`
     : `BX24.init(function() { BX24.closeApplication(); });`
@@ -37,7 +49,7 @@ tryAction();
 </html>`
 }
 
-function contactCenterHtml(lineId: string, connectorId: string, dashboardUrl: string) {
+function connectorSetupHtml(lineId: string, connectorId: string, dashboardUrl: string) {
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>WhatsApp (SendPulse)</title>
@@ -60,7 +72,7 @@ p{font-size:13px;color:#666;line-height:1.5;margin-bottom:6px;}
   <h2>WhatsApp (SendPulse) Connected</h2>
   <p>This open line has been linked to your connector.</p>
   ${lineId ? `<div class="line-id">Line ID: ${lineId}</div>` : ''}
-  <p>To complete setup, open the dashboard and map this line to a SendPulse bot under <strong>Open Channels</strong>.</p>
+  <p>Open the dashboard and map this line to a SendPulse bot under <strong>Open Channels</strong>.</p>
   ${dashboardUrl ? `<a class="btn" href="${dashboardUrl}" target="_blank">Open Dashboard</a>` : ''}
   <p class="note">You can close this window.</p>
 </div>
@@ -68,9 +80,7 @@ p{font-size:13px;color:#666;line-height:1.5;margin-bottom:6px;}
 <script>
 function f(){
   if(typeof BX24!=='undefined'){
-    BX24.init(function(){
-      if(BX24.fitWindow) BX24.fitWindow();
-    });
+    BX24.init(function(){ if(BX24.fitWindow) BX24.fitWindow(); });
   } else { setTimeout(f,200); }
 }
 f();
@@ -82,6 +92,7 @@ f();
 serve(async (req: Request) => {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
+
   if (req.method === 'GET') {
     const urlParams = new URL(req.url).searchParams
     const pl = urlParams.get('PLACEMENT') || 'DEFAULT'
@@ -91,7 +102,13 @@ serve(async (req: Request) => {
   let placement = 'DEFAULT'
   try {
     const bodyText = await req.text()
-    const data = parseNestedForm(bodyText)
+    let data: any = {}
+    const ct = req.headers.get('content-type') || ''
+    if (ct.includes('application/json')) {
+      try { data = JSON.parse(bodyText) } catch { data = {} }
+    } else {
+      data = parseNestedForm(bodyText)
+    }
 
     const accessToken = data.AUTH_ID || data.auth?.access_token || ''
     const refreshToken = data.REFRESH_ID || data.auth?.refresh_token || ''
@@ -99,21 +116,10 @@ serve(async (req: Request) => {
     const expiresIn = parseInt(data.AUTH_EXPIRES || data.auth?.expires_in || '3600', 10)
     placement = data.PLACEMENT || 'DEFAULT'
 
-    const referer = req.headers.get('referer') || req.headers.get('origin') || ''
-    let portalEndpoint = ''
-    if (referer) {
-      try {
-        const u = new URL(referer)
-        portalEndpoint = `${u.protocol}//${u.host}/rest/`
-      } catch {
-        portalEndpoint = ''
-      }
-    }
-    // serverEndpoint may be empty for CONTACT_CENTER iframes (no referer). Will be patched from account.domain below.
-    let serverEndpoint = portalEndpoint || data.SERVER_ENDPOINT || data.auth?.server_endpoint || ''
+    console.log(`[installer] method=POST placement=${placement} memberId=${memberId} hasToken=${!!accessToken}`)
 
     if (!accessToken) {
-      console.error('No access token in installer POST')
+      console.error('[installer] No access token')
       return new Response(makeHtml(placement), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
     }
 
@@ -124,27 +130,38 @@ serve(async (req: Request) => {
     const functionsBase = `${SUPABASE_URL}/functions/v1`
     const installerUrl = `${functionsBase}/bitrix24Installer`
     const handlerUrl = `${functionsBase}/bitrix24Handler`
-    // Guard: never use a Supabase functions URL as the dashboard/CRM handler —
-    // those URLs require auth headers and will show the auth error inside Bitrix24.
     const isValidAppUrl = appBaseUrl && !appBaseUrl.includes('/functions/v1')
-    console.log('installer appBaseUrl:', appBaseUrl, 'isValid:', isValidAppUrl)
+    console.log(`[installer] appBaseUrl=${appBaseUrl} isValid=${isValidAppUrl}`)
     const dashboardUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
     const crmChatUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
 
-    let account = null
+    // Build serverEndpoint — try referer first, then POST body fields
+    const referer = req.headers.get('referer') || req.headers.get('origin') || ''
+    let serverEndpoint = ''
+    if (referer) {
+      try {
+        const u = new URL(referer)
+        serverEndpoint = `${u.protocol}//${u.host}/rest/`
+      } catch { /* ignore */ }
+    }
+    if (!serverEndpoint) {
+      serverEndpoint = data.SERVER_ENDPOINT || data.auth?.server_endpoint || ''
+    }
+
+    // Look up account by member_id
+    let account: any = null
     if (memberId) {
       const { data: existing = [] } = await supabase.from('bitrix24_accounts').select('*').eq('member_id', memberId).limit(1)
       account = existing[0] || null
     }
 
-    // Fallback: CONTACT_CENTER iframes don't always send referer/SERVER_ENDPOINT,
-    // but the account already has the domain captured during DEFAULT install.
+    // Fallback: connector placements don't send referer; use the domain saved during DEFAULT install
     if (!serverEndpoint && account?.domain) {
       serverEndpoint = account.domain
     }
-    console.log(`[installer] placement=${placement} memberId=${memberId} serverEndpoint=${serverEndpoint}`)
+    console.log(`[installer] serverEndpoint=${serverEndpoint}`)
 
-    const accountData = {
+    const accountData: any = {
       domain: serverEndpoint || account?.domain || '',
       member_id: memberId,
       access_token: accessToken,
@@ -160,13 +177,16 @@ serve(async (req: Request) => {
       await supabase.from('bitrix24_accounts').update(accountData).eq('id', account.id)
       account = { ...account, ...accountData }
     } else {
-      const portalName = serverEndpoint ? (() => { try { return new URL(serverEndpoint).host } catch { return `Portal ${memberId}` } })() : `Portal ${memberId}`
+      const portalName = serverEndpoint
+        ? (() => { try { return new URL(serverEndpoint).host } catch { return `Portal ${memberId}` } })()
+        : `Portal ${memberId}`
       const { data: inserted = [] } = await supabase.from('bitrix24_accounts').insert([{ name: portalName, ...accountData }]).select('*').limit(1)
       account = inserted?.[0] || null
     }
 
     const connectorId = memberId ? `whatsapp_sp_${memberId.substring(0, 10)}` : 'whatsapp_sendpulse'
 
+    // ── DEFAULT: register connector + bind placements ────────────────────────
     if (placement === 'DEFAULT' && serverEndpoint) {
       await callBitrix(serverEndpoint, accessToken, 'imconnector.register', {
         ID: connectorId,
@@ -179,21 +199,19 @@ serve(async (req: Request) => {
       if (handlerUrl) {
         const existingEventsRes = await callBitrix(serverEndpoint, accessToken, 'event.get', {})
         const existingHandlers = Array.isArray(existingEventsRes?.result) ? existingEventsRes.result : []
-        for (const h of existingHandlers.filter((h) => h.event === 'ONIMCONNECTORMESSAGEADD' && h.handler === handlerUrl)) {
+        for (const h of existingHandlers.filter((h: any) => h.event === 'ONIMCONNECTORMESSAGEADD' && h.handler === handlerUrl)) {
           await callBitrix(serverEndpoint, accessToken, 'event.unbind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: h.handler })
         }
         await callBitrix(serverEndpoint, accessToken, 'event.bind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: handlerUrl })
       }
 
-      if (installerUrl) {
-        await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'CONTACT_CENTER', HANDLER: installerUrl })
-        await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
-          PLACEMENT: 'CONTACT_CENTER',
-          HANDLER: installerUrl,
-          TITLE: 'WhatsApp (SendPulse)',
-          DESCRIPTION: 'WhatsApp channel via SendPulse',
-        })
-      }
+      await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'CONTACT_CENTER', HANDLER: installerUrl })
+      await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
+        PLACEMENT: 'CONTACT_CENTER',
+        HANDLER: installerUrl,
+        TITLE: 'WhatsApp (SendPulse)',
+        DESCRIPTION: 'WhatsApp channel via SendPulse',
+      })
 
       if (dashboardUrl) {
         await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'LEFT_MENU', HANDLER: dashboardUrl })
@@ -207,26 +225,23 @@ serve(async (req: Request) => {
       if (crmChatUrl) {
         for (const pl of ['CRM_LEAD_DETAIL_TAB', 'CRM_DEAL_DETAIL_TAB', 'CRM_CONTACT_DETAIL_TAB', 'CRM_COMPANY_DETAIL_TAB']) {
           await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: pl, HANDLER: crmChatUrl })
-          await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
-            PLACEMENT: pl,
-            HANDLER: crmChatUrl,
-            TITLE: 'WhatsApp Chat',
-          })
+          await callBitrix(serverEndpoint, accessToken, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'WhatsApp Chat' })
         }
       }
     }
 
-    if (placement === 'CONTACT_CENTER' && serverEndpoint) {
-      const rawPO = data.PLACEMENT_OPTIONS
-      // Bitrix24 may send PLACEMENT_OPTIONS as a JSON string OR as nested form fields (already parsed to object)
-      const placementOptions: any = (rawPO && typeof rawPO === 'object')
-        ? rawPO
-        : (() => { try { return JSON.parse(rawPO || '{}') } catch { return {} } })()
+    // ── SETTING_CONNECTOR / CONTACT_CENTER: activate connector for a line ────
+    if (isConnectorPlacement(placement) && serverEndpoint) {
+      const placementOptions = parsePlacementOptions(data.PLACEMENT_OPTIONS)
       const lineId = String(placementOptions.LINE || placementOptions.CONNECTOR_LINE || placementOptions.ACTIVE_LINE || '')
-      console.log('[installer] CONTACT_CENTER rawPO:', JSON.stringify(rawPO), 'lineId:', lineId)
+      console.log(`[installer] connector setup placement=${placement} rawPO=${JSON.stringify(data.PLACEMENT_OPTIONS)} lineId=${lineId}`)
+
       if (lineId) {
         const lineNum = Number(lineId)
-        const activateRes = await callBitrix(serverEndpoint, accessToken, 'imconnector.activate', { CONNECTOR: connectorId, LINE: lineNum, ACTIVE: 'Y' })
+
+        const activateRes = await callBitrix(serverEndpoint, accessToken, 'imconnector.activate', {
+          CONNECTOR: connectorId, LINE: lineNum, ACTIVE: 'Y',
+        })
         console.log('[installer] imconnector.activate:', JSON.stringify(activateRes))
 
         const dataSetRes = await callBitrix(serverEndpoint, accessToken, 'imconnector.connector.data.set', {
@@ -236,9 +251,16 @@ serve(async (req: Request) => {
         })
         console.log('[installer] imconnector.connector.data.set:', JSON.stringify(dataSetRes))
 
-        const { data: existingChannels = [] } = await supabase.from('bitrix24_open_channels').select('*').eq('bitrix24_account_id', account?.id).eq('bitrix24_line_id', lineId).limit(1)
+        // Insert channel record in our DB (visible in dashboard)
+        const { data: existingChannels = [] } = await supabase
+          .from('bitrix24_open_channels')
+          .select('*')
+          .eq('bitrix24_account_id', account?.id)
+          .eq('bitrix24_line_id', lineId)
+          .limit(1)
+
         if (!existingChannels.length) {
-          const insertRes = await supabase.from('bitrix24_open_channels').insert([{
+          const { error: insertErr } = await supabase.from('bitrix24_open_channels').insert([{
             owner_id: account?.owner_id || null,
             organization_id: account?.organization_id || null,
             name: `${account?.name || 'Portal'} — Line ${lineId}`,
@@ -249,9 +271,9 @@ serve(async (req: Request) => {
             channel: 'whatsapp',
             status: 'active',
           }])
-          if (insertRes.error) console.error('insert open channel error:', insertRes.error)
+          if (insertErr) console.error('[installer] insert open channel error:', JSON.stringify(insertErr))
+          else console.log(`[installer] inserted channel for line ${lineId}`)
         } else {
-          // If channel exists but is missing organization_id, repair it
           const ch = existingChannels[0]
           if (!ch.organization_id && account?.organization_id) {
             await supabase.from('bitrix24_open_channels').update({
@@ -259,26 +281,26 @@ serve(async (req: Request) => {
               owner_id: ch.owner_id || account?.owner_id || null,
             }).eq('id', ch.id)
           }
+          console.log(`[installer] channel for line ${lineId} already exists`)
         }
+      } else {
+        console.warn('[installer] PLACEMENT_OPTIONS missing LINE — skipping activation')
       }
     }
 
+    // ── Build response HTML ──────────────────────────────────────────────────
     let finalHtml: string
-    if (placement === 'CONTACT_CENTER') {
-      const capturedLineId = (() => {
-        const rawPO2 = data.PLACEMENT_OPTIONS
-        const opts: any = (rawPO2 && typeof rawPO2 === 'object')
-          ? rawPO2
-          : (() => { try { return JSON.parse(rawPO2 || '{}') } catch { return {} } })()
-        return String(opts.LINE || opts.CONNECTOR_LINE || opts.ACTIVE_LINE || '')
-      })()
-      finalHtml = contactCenterHtml(capturedLineId, connectorId, dashboardUrl)
+    if (isConnectorPlacement(placement)) {
+      const placementOptions = parsePlacementOptions(data.PLACEMENT_OPTIONS)
+      const lineId = String(placementOptions.LINE || placementOptions.CONNECTOR_LINE || placementOptions.ACTIVE_LINE || '')
+      finalHtml = connectorSetupHtml(lineId, connectorId, dashboardUrl)
     } else {
       finalHtml = makeHtml(placement, dashboardUrl)
     }
     return new Response(finalHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+
   } catch (error) {
-    console.error('bitrix24Installer error:', error)
-    return new Response(makeHtml('DEFAULT'), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    console.error('[installer] error:', error)
+    return new Response(makeHtml(placement), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
 })
