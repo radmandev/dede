@@ -227,11 +227,8 @@ async function sendToBitrix24(
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 80)}`)
-    // Use filename as text so message.text is never empty for media (Bitrix24 may require non-empty)
-    if (!messageObj.text) messageObj.text = fname
-    // Try both FILES locations: inside message AND as sibling (Bitrix24 API varies by version)
-    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
-    msgItem.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
+    // FILES must be an array, not an object with numeric keys
+    msgItem.FILES = [{ link: mediaUrl, name: fname, type: fileType }]
   }
 
   const payload = {
