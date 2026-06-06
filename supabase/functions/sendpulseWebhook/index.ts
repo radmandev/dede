@@ -55,7 +55,7 @@ async function reHostMedia(opts: {
     if (!ext) ext = extFromMsgType(msgType)
     const base = (filename || 'media').replace(/[^\x00-\x7F]/g, '_').replace(/\s+/g, '_').replace(/_{2,}/g, '_').substring(0, 60)
     const finalName = base.includes('.') ? base : base + ext
-    const storagePath = `attachments/${Date.now()}_${finalName}`
+    const storagePath = `media/${Date.now()}_${finalName}`
     const { error } = await supabase.storage
       .from('attachments')
       .upload(storagePath, new Uint8Array(buffer), { contentType, upsert: false })
@@ -226,9 +226,11 @@ async function sendToBitrix24(
     const fileType = isImage ? 'IMAGE' : isAudio ? 'AUDIO' : 'DOCUMENT'
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
-    console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 80)}`)
-    // FILES must be an array, not an object with numeric keys
-    msgItem.FILES = [{ link: mediaUrl, name: fname, type: fileType }]
+    console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 120)}`)
+    // Non-empty text required — Bitrix24 drops the entire message if text is empty and files fail
+    if (!messageObj.text) messageObj.text = isImage ? '📷 Image' : isAudio ? '🎵 Audio' : '📎 File'
+    // FILES inside message object with numeric-string key format (Bitrix24 PHP-array style)
+    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
 
   const payload = {
@@ -237,7 +239,6 @@ async function sendToBitrix24(
     MESSAGES: [msgItem],
   }
 
-  if (mediaUrl) console.log('[b24] full payload:', JSON.stringify(payload))
   const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -247,7 +248,9 @@ async function sendToBitrix24(
   if (result?.error) {
     console.error('[b24] imconnector.send.messages error:', JSON.stringify(result))
   } else {
-    console.log('[b24] sent ok, result:', JSON.stringify(result?.result).substring(0, 200))
+    const msgResult = result?.result?.DATA?.RESULT?.[0] || result?.result?.[0] || result?.result
+    console.log('[b24] sent ok, files in result:', JSON.stringify(msgResult?.message?.files ?? msgResult?.files ?? 'n/a'))
+    if (mediaUrl) console.log('[b24] full result:', JSON.stringify(result?.result).substring(0, 500))
   }
 
   const returnedChatId =
