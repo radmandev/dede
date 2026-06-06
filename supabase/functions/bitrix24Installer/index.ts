@@ -9,10 +9,13 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 
 const WA_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%2325D366'/%3E%3Cpath fill='%23fff' d='M24 8C15 8 8 15 8 24c0 3 .8 5.8 2.2 8.2L10 40l8.1-2.1C20.2 39 22 39.5 24 39.5c9 0 16-7 16-16S33 8 24 8zm0 28c-2 0-3.9-.6-5.5-1.7l-.3-.2-4.8 1.2 1.3-4.7-.2-.3C13.5 28.6 13 26.3 13 24c0-6.1 4.9-11 11-11s11 4.9 11 11-4.9 11-11 11z'/%3E%3C/svg%3E"
 
-function makeHtml(placement) {
+function makeHtml(placement, dashboardUrl = '') {
   const jsAction = placement === 'DEFAULT'
     ? `BX24.init(function() { BX24.installFinish(); });`
     : `BX24.init(function() { BX24.closeApplication(); });`
+  const dashLink = (placement === 'DEFAULT' && dashboardUrl)
+    ? `<p style="margin-top:20px"><a href="${dashboardUrl}" target="_blank" style="display:inline-block;padding:10px 24px;background:#25D366;color:#fff;border-radius:8px;font-size:14px;font-weight:500;text-decoration:none;">Open Dashboard →</a></p>`
+    : ''
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>WhatsApp Connector</title>
@@ -20,7 +23,7 @@ function makeHtml(placement) {
 .box{text-align:center;padding:40px;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.1);}
 h2{color:#25D366;margin:0 0 8px;}p{color:#555;margin:0;}</style>
 </head>
-<body><div class="box"><h2>✅ WhatsApp (SendPulse)</h2><p>Connector configured successfully.</p></div>
+<body><div class="box"><h2>✅ WhatsApp (SendPulse)</h2><p>Connector configured successfully.</p>${dashLink}</div>
 <script src="//api.bitrix24.com/api/v1/"></script>
 <script>
 function tryAction() {
@@ -206,9 +209,13 @@ serve(async (req: Request) => {
     }
 
     if (placement === 'CONTACT_CENTER' && serverEndpoint) {
-      let placementOptions = {}
-      try { placementOptions = JSON.parse(data.PLACEMENT_OPTIONS || '{}') } catch {}
+      const rawPO = data.PLACEMENT_OPTIONS
+      // Bitrix24 may send PLACEMENT_OPTIONS as a JSON string OR as nested form fields (already parsed to object)
+      const placementOptions: any = (rawPO && typeof rawPO === 'object')
+        ? rawPO
+        : (() => { try { return JSON.parse(rawPO || '{}') } catch { return {} } })()
       const lineId = String(placementOptions.LINE || placementOptions.CONNECTOR_LINE || placementOptions.ACTIVE_LINE || '')
+      console.log('[installer] CONTACT_CENTER rawPO:', JSON.stringify(rawPO), 'lineId:', lineId)
       if (lineId) {
         await callBitrix(serverEndpoint, accessToken, 'imconnector.activate', { CONNECTOR: connectorId, LINE: lineId, ACTIVE: 'Y' })
         await callBitrix(serverEndpoint, accessToken, 'imconnector.connector.data.set', {
@@ -219,8 +226,27 @@ serve(async (req: Request) => {
 
         const { data: existingChannels = [] } = await supabase.from('bitrix24_open_channels').select('*').eq('bitrix24_account_id', account?.id).eq('bitrix24_line_id', lineId).limit(1)
         if (!existingChannels.length) {
-          const insertRes = await supabase.from('bitrix24_open_channels').insert([{ owner_id: account?.owner_id || null, name: `${account?.name || 'Portal'} — Line ${lineId}`, bitrix24_account_id: account?.id, sendpulse_account_id: null, bitrix24_line_id: lineId, bitrix24_connector_id: connectorId, channel: 'whatsapp', status: 'active' }])
-      if (insertRes.error) console.error('insert open channel error:', insertRes.error)
+          const insertRes = await supabase.from('bitrix24_open_channels').insert([{
+            owner_id: account?.owner_id || null,
+            organization_id: account?.organization_id || null,
+            name: `${account?.name || 'Portal'} — Line ${lineId}`,
+            bitrix24_account_id: account?.id,
+            sendpulse_account_id: null,
+            bitrix24_line_id: lineId,
+            bitrix24_connector_id: connectorId,
+            channel: 'whatsapp',
+            status: 'active',
+          }])
+          if (insertRes.error) console.error('insert open channel error:', insertRes.error)
+        } else {
+          // If channel exists but is missing organization_id, repair it
+          const ch = existingChannels[0]
+          if (!ch.organization_id && account?.organization_id) {
+            await supabase.from('bitrix24_open_channels').update({
+              organization_id: account.organization_id,
+              owner_id: ch.owner_id || account?.owner_id || null,
+            }).eq('id', ch.id)
+          }
         }
       }
     }
@@ -235,7 +261,7 @@ serve(async (req: Request) => {
       })()
       finalHtml = contactCenterHtml(capturedLineId, connectorId, dashboardUrl)
     } else {
-      finalHtml = makeHtml(placement)
+      finalHtml = makeHtml(placement, dashboardUrl)
     }
     return new Response(finalHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   } catch (error) {

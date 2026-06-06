@@ -31,6 +31,14 @@ serve(async (req: Request) => {
     const token = await ensureBitrixToken(supabase, account)
     if (!token) return makeJsonResponse({ error: 'No valid token for this account' }, 400)
 
+    // Repair channels that were created before auto-claim set organization_id
+    if (account.organization_id) {
+      await supabase.from('bitrix24_open_channels')
+        .update({ organization_id: account.organization_id, owner_id: account.owner_id || null })
+        .eq('bitrix24_account_id', bitrix24_account_id)
+        .is('organization_id', null)
+    }
+
     // imopenlines.config.list requires the 'imopenlines' scope.
     // If the app lacks it, fall back to lines already captured in our DB.
     const result = await callBitrix(account.domain, token, 'imopenlines.config.list', {})

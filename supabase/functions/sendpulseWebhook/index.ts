@@ -281,23 +281,29 @@ serve(async (req: Request) => {
     let ownerId: string | null = null
     let orgId: string | null = null
     let sendpulseAccountId: string | null = null
+
+    console.log(`[webhook] channel=${channel} botId=${botId} contactId=${contactId} direction=${direction}`)
+
     if (botId) {
-      // First try: bot with an org attached
+      // First try: bot with an org attached (maybeSingle returns null without error on 0 rows)
       const { data: orgBot } = await supabase
         .from('sendpulse_bots')
         .select('id, owner_id, sendpulse_account_id, organization_id')
         .eq('bot_id', botId)
         .not('organization_id', 'is', null)
         .limit(1)
-        .single()
+        .maybeSingle()
+
       // Fall back to any bot row if none has an org
       const { data: anyBot } = orgBot ? { data: orgBot } : await supabase
         .from('sendpulse_bots')
         .select('id, owner_id, sendpulse_account_id, organization_id')
         .eq('bot_id', botId)
         .limit(1)
-        .single()
-      const botRow = anyBot
+        .maybeSingle()
+
+      const botRow = orgBot ?? anyBot
+      console.log(`[webhook] botRow=${JSON.stringify(botRow)}`)
       if (botRow) {
         botUuid = botRow.id
         ownerId = botRow.owner_id
@@ -305,32 +311,38 @@ serve(async (req: Request) => {
         sendpulseAccountId = botRow.sendpulse_account_id
       }
     }
-    // Fall back to account lookup if bot not found
+
+    // Fall back to account lookup if bot not found in our DB yet
     if (!sendpulseAccountId) {
+      console.warn(`[webhook] bot_id=${botId} not found in sendpulse_bots — falling back to account lookup`)
       const { data: acc } = await supabase
         .from('sendpulse_accounts')
         .select('id, owner_id, organization_id')
-        .order('created_at', { ascending: true })
+        .not('organization_id', 'is', null)   // prefer org-aware accounts
+        .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       if (acc) {
         ownerId = ownerId || acc.owner_id
         orgId = orgId || acc.organization_id
         sendpulseAccountId = acc.id
       }
     }
-    // If org not on bot row, look it up from the account
+
+    // If org still not resolved from bot row, read it from the account
     if (!orgId && sendpulseAccountId) {
       const { data: acc } = await supabase
         .from('sendpulse_accounts')
         .select('organization_id, owner_id')
         .eq('id', sendpulseAccountId)
-        .single()
+        .maybeSingle()
       if (acc) {
         orgId = orgId || acc.organization_id
         ownerId = ownerId || acc.owner_id
       }
     }
+
+    console.log(`[webhook] resolved orgId=${orgId} ownerId=${ownerId} sendpulseAccountId=${sendpulseAccountId}`)
 
     // Re-host media to Supabase Storage for a stable public URL.
     // Primary strategy: SendPulse's own media proxy at login.sendpulse.com (requires Bearer token).
@@ -394,7 +406,8 @@ serve(async (req: Request) => {
       .limit(1)
       .single()
 
-    if (convErr) console.error('conversation upsert error:', convErr)
+    if (convErr) console.error('[webhook] conversation upsert error:', JSON.stringify(convErr))
+    else console.log(`[webhook] conversation id=${convData?.id} org=${convData?.organization_id}`)
     const conversation = convData
 
     // Increment unread count
@@ -417,7 +430,7 @@ serve(async (req: Request) => {
         channel,
         sent_at: new Date().toISOString(),
       }])
-      if (msgErr) console.error('message insert error:', msgErr)
+      if (msgErr) console.error('[webhook] message insert error:', JSON.stringify(msgErr))
     }
 
     // Optionally forward to Bitrix24 if this bot is mapped to an open channel

@@ -61,22 +61,41 @@ serve(async (req: Request) => {
       const arr = Array.isArray(listData?.data) ? listData.data : (Array.isArray(listData) ? listData : [])
       if (!arr.length) continue
 
-      let webhookOk = false
-      if (webhookUrl) {
-        const whRes = await fetch(`https://api.sendpulse.com/${ch.webhook}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ url: webhookUrl, events: ['incoming_message', 'message'] }),
-        })
-        webhookOk = whRes.ok
-        webhooks.push({ channel: ch.key, ok: webhookOk })
-      }
-
       for (const bot of arr) {
         const botId = String(bot.id || bot.bot_id || '')
         if (!botId) continue
         const name = bot.name || bot.channel_data?.name || bot.title || `${ch.key} bot`
         const key = `${ch.key}_${botId}`
+
+        // Register webhook per-bot — more reliable than channel-level registration
+        let webhookOk = false
+        if (webhookUrl) {
+          // Try per-bot endpoint first (e.g. /whatsapp/bots/{id}/webhook)
+          const perBotEndpoint = `https://api.sendpulse.com/${ch.key === 'live_chat' ? 'live-chat' : ch.key}/bots/${botId}/webhook`
+          const perBotRes = await fetch(perBotEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ url: webhookUrl }),
+          })
+          const perBotBody = await perBotRes.text().catch(() => '')
+          console.log(`[sync] per-bot webhook ${ch.key}/${botId}: ${perBotRes.status} ${perBotBody}`)
+
+          if (perBotRes.ok) {
+            webhookOk = true
+          } else {
+            // Fallback: channel-level registration
+            const chRes = await fetch(`https://api.sendpulse.com/${ch.webhook}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ url: webhookUrl, event: 'new_message' }),
+            })
+            const chBody = await chRes.text().catch(() => '')
+            console.log(`[sync] channel webhook ${ch.key}: ${chRes.status} ${chBody}`)
+            webhookOk = chRes.ok
+          }
+          webhooks.push({ channel: ch.key, bot_id: botId, ok: webhookOk })
+        }
+
         const payload = {
           owner_id: account.owner_id || null,
           organization_id: account.organization_id || null,
@@ -91,7 +110,7 @@ serve(async (req: Request) => {
         } else {
           await supabase.from('sendpulse_bots').insert([payload])
         }
-        bots.push({ bot_id: botId, name, channel: ch.key })
+        bots.push({ bot_id: botId, name, channel: ch.key, webhook_active: webhookOk })
       }
     }
 
