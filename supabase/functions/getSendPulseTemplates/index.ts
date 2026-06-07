@@ -2,7 +2,6 @@ import { handleCors, jsonResponse, textResponse } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { ensureSendPulseToken } from '../lib/sendpulse.ts'
-import { makeJsonResponse } from '../lib/bitrix24.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -22,28 +21,36 @@ serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}))
     const { botId } = body || {}
-    if (!botId) return makeJsonResponse({ error: 'botId is required' }, 400)
+    if (!botId) return jsonResponse({ error: 'botId is required' }, 400)
 
-    const { data: bots, error: botErr } = await supabase.from('sendpulse_bots').select('*').eq('bot_id', String(botId)).limit(1)
+    // botId may be the row UUID (id) or the external bot_id text — try both
+    let { data: bots, error: botErr } = await supabase.from('sendpulse_bots').select('*').eq('id', String(botId)).limit(1)
     if (botErr) throw botErr
+    if (!bots?.length) {
+      const { data: bots2, error: botErr2 } = await supabase.from('sendpulse_bots').select('*').eq('bot_id', String(botId)).limit(1)
+      if (botErr2) throw botErr2
+      bots = bots2
+    }
     const bot = bots?.[0]
-    if (!bot?.sendpulse_account_id) return makeJsonResponse({ error: 'Bot not found' }, 404)
+    if (!bot?.sendpulse_account_id) return jsonResponse({ error: 'Bot not found' }, 404)
 
     const { data: accounts, error: accountErr } = await supabase.from('sendpulse_accounts').select('*').eq('id', bot.sendpulse_account_id).limit(1)
     if (accountErr) throw accountErr
     const account = accounts?.[0]
-    if (!account) return makeJsonResponse({ error: 'SendPulse account not found' }, 404)
+    if (!account) return jsonResponse({ error: 'SendPulse account not found' }, 404)
 
     const token = await ensureSendPulseToken(supabase, account.id)
-    if (!token) return makeJsonResponse({ error: 'Failed to obtain SendPulse token' }, 500)
+    if (!token) return jsonResponse({ error: 'Failed to obtain SendPulse token' }, 500)
 
-    const res = await fetch(`https://api.sendpulse.com/whatsapp/templates?bot_id=${encodeURIComponent(botId)}`, {
+    // Use the bot's external bot_id for the SendPulse API call
+    const externalBotId = bot.bot_id || String(botId)
+    const res = await fetch(`https://api.sendpulse.com/whatsapp/templates?bot_id=${encodeURIComponent(externalBotId)}`, {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     })
     const data = await res.json().catch(() => null)
     if (!res.ok) {
       console.error('SendPulse templates error:', JSON.stringify(data))
-      return makeJsonResponse({ error: data?.message || 'Failed to fetch templates' }, res.status)
+      return jsonResponse({ error: data?.message || 'Failed to fetch templates' }, res.status)
     }
 
     const raw = Array.isArray(data) ? data : (data.data || data.templates || [])
@@ -72,9 +79,9 @@ serve(async (req: Request) => {
       })
       .filter((template) => template.name)
 
-    return makeJsonResponse({ templates })
+    return jsonResponse({ templates })
   } catch (error) {
     console.error('getSendPulseTemplates error:', error)
-    return makeJsonResponse({ error: String(error) }, 500)
+    return jsonResponse({ error: String(error) }, 500)
   }
 })
