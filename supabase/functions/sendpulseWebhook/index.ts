@@ -204,9 +204,17 @@ async function sendToBitrix24(
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 120)}`)
-    // Bitrix24 requires non-empty text when FILES are present
-    if (!messageObj.text) messageObj.text = isImage ? '📷 Image' : isAudio ? '🎵 Audio' : '📎 File'
-    // FILES must be uppercase with PHP-style numeric string keys — Bitrix24 ignores lowercase/array formats
+    // Bitrix24 silently fails to download external URLs via FILES — embed media via BBCode instead.
+    // [IMG]url[/IMG] renders inline in open channel chat (same mechanism agents use when sending images).
+    if (isImage) {
+      const base = messageText ? messageText + '\n' : ''
+      messageObj.text = base + `[IMG]${mediaUrl}[/IMG]`
+    } else if (isAudio) {
+      messageObj.text = messageText || `[URL=${mediaUrl}]🎵 Audio[/URL]`
+    } else {
+      messageObj.text = messageText || `[URL=${mediaUrl}]📎 ${fname}[/URL]`
+    }
+    // Still include FILES — some portal versions may handle it correctly
     messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
 
