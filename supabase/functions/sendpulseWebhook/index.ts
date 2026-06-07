@@ -120,56 +120,6 @@ async function reHostMedia(opts: {
 
 // Upload a file to Bitrix24 Disk so FILES can reference a native Bitrix24 URL.
 // Bitrix24 silently drops external URLs in FILES (files:[]) but works fine with its own Disk URLs.
-async function uploadFileToBitrix24Disk(
-  endpoint: string, token: string, sourceUrl: string, fname: string
-): Promise<string | null> {
-  // Download from our Supabase public bucket
-  const srcRes = await fetch(sourceUrl)
-  if (!srcRes.ok) { console.warn('[b24disk] source fetch failed:', srcRes.status); return null }
-  const buf = await srcRes.arrayBuffer()
-
-  // Base64-encode for JSON upload (Bitrix24 disk.folder.uploadfile accepts [name, base64])
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  const b64 = btoa(binary)
-
-  // Locate the app's dedicated storage folder
-  let folderId: string | null = null
-  const appStorageRes = await fetch(`${endpoint}disk.storage.getforapp?auth=${token}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-  })
-  const appStorageData = await appStorageRes.json()
-  folderId = appStorageData?.result?.ROOT_OBJECT?.ID ? String(appStorageData.result.ROOT_OBJECT.ID) : null
-
-  if (!folderId) {
-    // Fallback: first available storage from disk.storage.getlist
-    const listRes = await fetch(`${endpoint}disk.storage.getlist?auth=${token}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    })
-    const listData = await listRes.json()
-    const storages: any[] = listData?.result || []
-    const storage = storages.find((s: any) => s.TYPE === 'COMMON') || storages[0]
-    folderId = storage?.ROOT_OBJECT?.ID ? String(storage.ROOT_OBJECT.ID) : null
-  }
-
-  if (!folderId) { console.warn('[b24disk] no folder found'); return null }
-
-  const uploadRes = await fetch(`${endpoint}disk.folder.uploadfile?auth=${token}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: folderId, data: { NAME: fname }, fileContent: [fname, b64] }),
-  })
-  const uploadData = await uploadRes.json()
-  const dlUrl: string | null = uploadData?.result?.DOWNLOAD_URL || null
-  if (dlUrl) {
-    console.log('[b24disk] uploaded ok, url:', dlUrl.substring(0, 100))
-  } else {
-    console.warn('[b24disk] upload failed:', JSON.stringify(uploadData?.error || uploadData?.result))
-  }
-  return dlUrl
-}
-
 async function refreshBitrix24Token(account: any) {
   if (!account.app_client_id || !account.app_client_secret || !account.refresh_token) return null
   const res = await fetch('https://oauth.bitrix.info/oauth/token/', {
@@ -252,17 +202,10 @@ async function sendToBitrix24(
   if (mediaUrl) {
     const isImage = msgType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaFilename || '')
     const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
-    const fileType = isImage ? 'IMAGE' : isAudio ? 'AUDIO' : 'DOCUMENT'
-    let fname = mediaFilename || 'file'
-    if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
-    console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 120)}`)
-
-    // Upload to Bitrix24 Disk so FILES references a native URL Bitrix24 can access without external fetch
-    const b24Url = await uploadFileToBitrix24Disk(endpoint, token, mediaUrl, fname)
-    const fileUrl = b24Url || mediaUrl
-
-    if (!messageObj.text) messageObj.text = isImage ? '📷 Image' : isAudio ? '🎵 Audio' : '📎 File'
-    messageObj.FILES = { '0': { link: fileUrl, name: fname, type: fileType } }
+    const label = isImage ? 'image' : isAudio ? 'audio' : 'file'
+    console.log(`[b24] media BBCode: label=${label} url=${mediaUrl.substring(0, 120)}`)
+    // Bitrix24 renders [URL=url]image[/URL] as a clickable attachment in open channels
+    messageObj.text = `[URL=${mediaUrl}]${label}[/URL]`
   }
 
   const payload = {
