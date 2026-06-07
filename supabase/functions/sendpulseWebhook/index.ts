@@ -185,18 +185,6 @@ async function sendToBitrix24(
   const endpoint = accountDomain.endsWith('/') ? accountDomain : accountDomain + '/'
   console.log(`[b24] forwarding to connector=${CONNECTOR_ID} line=${LINE_ID} domain=${accountDomain}`)
 
-  // Ensure connector is active on this line before sending (re-registration can reset activation)
-  try {
-    const activateRes = await fetch(`${endpoint}imconnector.activate?auth=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ CONNECTOR: CONNECTOR_ID, LINE: LINE_ID, ACTIVE: 'Y' }),
-    })
-    const activateData = await activateRes.json()
-    if (activateData?.error) console.warn('[b24] imconnector.activate warn:', JSON.stringify(activateData))
-    else console.log('[b24] imconnector.activate ok')
-  } catch (e: any) { console.warn('[b24] imconnector.activate failed (non-fatal):', e.message) }
-
   const unixNow = Math.floor(Date.now() / 1000)
   const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
 
@@ -222,10 +210,10 @@ async function sendToBitrix24(
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 120)}`)
-    // Non-empty text required — Bitrix24 drops the entire message if text is empty and files fail
+    // Keep a text fallback — Bitrix24 still shows this alongside the file
     if (!messageObj.text) messageObj.text = isImage ? '📷 Image' : isAudio ? '🎵 Audio' : '📎 File'
-    // FILES inside message object with numeric-string key format (Bitrix24 PHP-array style)
-    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
+    // Use proper array format — uppercase FILES with PHP-style keys is silently ignored by Bitrix24
+    messageObj.files = [{ link: mediaUrl, name: fname, type: fileType, size: 0 }]
   }
 
   const payload = {
