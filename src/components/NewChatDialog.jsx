@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -10,11 +10,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Send, Phone, User } from "lucide-react";
 import { toast } from "sonner";
 
-export default function NewChatDialog({ open, onClose, onConversationCreated }) {
+export default function NewChatDialog({ open, onClose, onConversationCreated, defaultPhone = "" }) {
   const { currentMembership } = useAuth();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [botId, setBotId] = useState("");
+
+  // Pre-fill phone from CRM entity when dialog opens
+  useEffect(() => {
+    if (open && defaultPhone) setPhone(defaultPhone);
+  }, [open, defaultPhone]);
   const [submitting, setSubmitting] = useState(false);
 
   const { data: bots = [] } = useQuery({
