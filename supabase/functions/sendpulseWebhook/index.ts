@@ -210,10 +210,10 @@ async function sendToBitrix24(
     let fname = mediaFilename || 'file'
     if (!fname.includes('.')) fname += (isImage ? '.jpg' : isAudio ? '.mp3' : '.bin')
     console.log(`[b24] media: type=${fileType} fname=${fname} url=${mediaUrl.substring(0, 120)}`)
-    // Keep a text fallback — Bitrix24 still shows this alongside the file
+    // Bitrix24 requires non-empty text when FILES are present
     if (!messageObj.text) messageObj.text = isImage ? '📷 Image' : isAudio ? '🎵 Audio' : '📎 File'
-    // Use proper array format — uppercase FILES with PHP-style keys is silently ignored by Bitrix24
-    messageObj.files = [{ link: mediaUrl, name: fname, type: fileType, size: 0 }]
+    // FILES must be uppercase with PHP-style numeric string keys — Bitrix24 ignores lowercase/array formats
+    messageObj.FILES = { '0': { link: mediaUrl, name: fname, type: fileType } }
   }
 
   const payload = {
