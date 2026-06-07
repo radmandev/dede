@@ -286,9 +286,12 @@ export default function MessageComposer({ conversation, onSend, isSending, error
 
   const handleSend = async () => {
     if (mode === "text") {
-      if (!text.trim()) return;
-      await onSend({ message_type: "text", message_text: text.trim() });
-      setText("");
+      const msg = text.trim();
+      if (!msg) return;
+      setText(""); // clear immediately so next message can be typed while this one sends
+      try {
+        await onSend({ message_type: "text", message_text: msg });
+      } catch (_) {} // error displayed via `error` prop from parent
     } else if (mode === "image" || mode === "file" || mode === "audio") {
       await uploadAndSend();
     } else if (mode === "template") {
@@ -318,7 +321,10 @@ export default function MessageComposer({ conversation, onSend, isSending, error
   };
 
   const canSend = () => {
-    if (isSending || uploading) return false;
+    if (uploading) return false;
+    // isSending only blocks non-text modes; for text, text is cleared immediately
+    // so the user can send the next message while the previous is in-flight
+    if (mode !== "text" && isSending) return false;
     if (mode === "text") return text.trim().length > 0;
     if (mode === "template") {
       if (!templateName.trim()) return false;
