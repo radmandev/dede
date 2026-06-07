@@ -204,8 +204,9 @@ async function sendToBitrix24(
     const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
     const label = isImage ? 'image' : isAudio ? 'audio' : 'file'
     console.log(`[b24] media BBCode: label=${label} url=${mediaUrl.substring(0, 120)}`)
-    // Bitrix24 renders [URL=url]image[/URL] as a clickable attachment in open channels
-    messageObj.text = `[URL=${mediaUrl}]${label}[/URL]`
+    // [URL=url]label[/URL] renders as a clickable link in Bitrix24 open channels
+    const mediaTag = `[URL=${mediaUrl}]${label}[/URL]`
+    messageObj.text = messageText ? `${messageText}\n${mediaTag}` : mediaTag
   }
 
   const payload = {
