@@ -27,50 +27,70 @@ export async function ensureSendPulseToken(supabase: any, accountId: string) {
   return data.access_token
 }
 
-export async function performSendPulseDelivery(supabase: any, accountId: string, channel: string, contactId: string, cleanText: string, attachments: any[]) {
+// A contactId that looks like a phone number means the SP contact wasn't resolved yet.
+// In that case we send using phone + bot_id instead of contact_id.
+function isPhoneContactId(id: string): boolean {
+  const s = (id || '').trim()
+  return s.startsWith('+') || /^\d{7,15}$/.test(s)
+}
+
+async function resolveExternalBotId(supabase: any, botRowId: string): Promise<string> {
+  if (!botRowId) return ''
+  const { data } = await supabase.from('sendpulse_bots').select('bot_id').eq('id', botRowId).limit(1).maybeSingle()
+  return data?.bot_id || ''
+}
+
+export async function performSendPulseDelivery(supabase: any, accountId: string, channel: string, contactId: string, cleanText: string, attachments: any[], botRowId = '') {
   if (!accountId || !contactId) throw new Error('missing accountId or contactId')
   const spToken = await ensureSendPulseToken(supabase, accountId)
   if (!spToken) throw new Error('unable to obtain sendpulse token')
 
-  const pathMap = { whatsapp: 'whatsapp', telegram: 'telegram', instagram: 'instagram', facebook: 'fb' }
+  const pathMap: Record<string, string> = { whatsapp: 'whatsapp', telegram: 'telegram', instagram: 'instagram', facebook: 'fb' }
   const path = pathMap[channel] || 'whatsapp'
   const spUrl = channel === 'live_chat' ? 'https://api.sendpulse.com/live-chat/contacts/send' : `https://api.sendpulse.com/${path}/contacts/send`
   const spHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` }
 
+  // Determine contact key: use phone+bot_id if contactId looks like a phone number
+  const usePhone = isPhoneContactId(contactId)
+  let externalBotId = ''
+  if (usePhone) {
+    externalBotId = await resolveExternalBotId(supabase, botRowId)
+    console.log(`[delivery] phone-based send phone=${contactId} bot_id=${externalBotId}`)
+  }
+  const contactKey = usePhone
+    ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
+    : { contact_id: contactId }
+
   // Build payload — each channel has its own API shape
   function buildTextPayload(text: string) {
     if (channel === 'live_chat') {
-      return { contact_id: contactId, messages: [{ type: 'text', text: { text } }] }
+      return { ...contactKey, messages: [{ type: 'text', text: { text } }] }
     }
     if (channel === 'instagram' || channel === 'facebook') {
-      // Instagram/Facebook: messages array with nested message object, text is a plain string
-      return { contact_id: contactId, messages: [{ type: 'text', message: { type: 'text', text } }] }
+      return { ...contactKey, messages: [{ type: 'text', message: { type: 'text', text } }] }
     }
-    // WhatsApp / Telegram: singular message with text.body
-    return { contact_id: contactId, message: { type: 'text', text: { body: text } } }
+    return { ...contactKey, message: { type: 'text', text: { body: text } } }
   }
 
   function buildAttachPayload(attType: string, attLink: string, attName: string) {
     if (channel === 'instagram' || channel === 'facebook') {
       if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
-        return { contact_id: contactId, messages: [{ type: 'image', message: { type: 'image', url: attLink } }] }
+        return { ...contactKey, messages: [{ type: 'image', message: { type: 'image', url: attLink } }] }
       }
-      return { contact_id: contactId, messages: [{ type: 'file', message: { type: 'file', url: attLink, filename: attName } }] }
+      return { ...contactKey, messages: [{ type: 'file', message: { type: 'file', url: attLink, filename: attName } }] }
     }
     if (channel === 'live_chat') {
-      return { contact_id: contactId, messages: [{ type: attType === 'image' ? 'image' : 'file', url: attLink }] }
+      return { ...contactKey, messages: [{ type: attType === 'image' ? 'image' : 'file', url: attLink }] }
     }
-    // WhatsApp / Telegram
     if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
-      return { contact_id: contactId, message: { type: 'image', image: { link: attLink } } }
+      return { ...contactKey, message: { type: 'image', image: { link: attLink } } }
     }
     if (attType === 'audio' || /\.(mp3|ogg|wav|m4a)$/i.test(attName)) {
-      return { contact_id: contactId, message: { type: 'audio', audio: { link: attLink } } }
+      return { ...contactKey, message: { type: 'audio', audio: { link: attLink } } }
     }
-    return { contact_id: contactId, message: { type: 'document', document: { link: attLink, filename: attName } } }
+    return { ...contactKey, message: { type: 'document', document: { link: attLink, filename: attName } } }
   }
 
-  // collect responses for diagnostics
   const results = []
   if (cleanText) {
     const spPayload = buildTextPayload(cleanText)
@@ -93,13 +113,12 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
   return results
 }
 
-export async function sendTemplateMessage(supabase: any, accountId: string, contactId: string, templateName: string, templateLanguage: string, bodyParams: string[], headerType: string, headerMediaUrl: string) {
+export async function sendTemplateMessage(supabase: any, accountId: string, contactId: string, templateName: string, templateLanguage: string, bodyParams: string[], headerType: string, headerMediaUrl: string, botRowId = '') {
   const spToken = await ensureSendPulseToken(supabase, accountId)
   if (!spToken) throw new Error('unable to obtain sendpulse token')
 
   const components: any[] = []
 
-  // Header component — only for media headers
   const mediaHeaderType = (headerType || '').toUpperCase()
   if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
     const paramKey = mediaHeaderType === 'IMAGE' ? 'image' : mediaHeaderType === 'VIDEO' ? 'video' : 'document'
@@ -109,7 +128,6 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     })
   }
 
-  // Body component — only when there are variable params
   if (bodyParams && bodyParams.length > 0) {
     components.push({
       type: 'body',
@@ -117,24 +135,30 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     })
   }
 
-  // Language codes must be lowercase (e.g. "ar" not "AR")
   const langCode = (templateLanguage || 'en').toLowerCase()
 
+  // Determine contact key: use phone+bot_id if contactId looks like a phone number
+  const usePhone = isPhoneContactId(contactId)
+  let externalBotId = ''
+  if (usePhone) {
+    externalBotId = await resolveExternalBotId(supabase, botRowId)
+  }
+  const contactKey = usePhone
+    ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
+    : { contact_id: contactId }
+
   const payload: any = {
-    contact_id: contactId,
+    ...contactKey,
     message: {
       type: 'template',
-      template: {
-        name: templateName,
-        language: { code: langCode },
-      },
+      template: { name: templateName, language: { code: langCode } },
     },
   }
   if (components.length > 0) {
     payload.message.template.components = components
   }
 
-  console.log(`[template] sending to contact=${contactId} name=${templateName} lang=${langCode} components=${JSON.stringify(components)}`)
+  console.log(`[template] sending ${usePhone ? `phone=${contactId} bot_id=${externalBotId}` : `contact_id=${contactId}`} name=${templateName} lang=${langCode} components=${JSON.stringify(components)}`)
 
   const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/send', {
     method: 'POST',

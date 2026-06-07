@@ -54,21 +54,24 @@ serve(async (req: Request) => {
       let contactId = null
       let channel = body?.channel || null
 
+      let botRowId = ''
       if (convRow) {
         if (!accountId) accountId = convRow.sendpulse_account_id
         contactId = convRow.sendpulse_contact_id
         if (!channel) channel = convRow.channel
+        botRowId = convRow.sendpulse_bot_id || ''
       }
       if (!contactId && body?.contact_id) contactId = body.contact_id
       channel = channel || 'live_chat'
+
+      console.log(`[sendMessage] accountId=${accountId} contactId=${contactId} botRowId=${botRowId} channel=${channel} isTemplate=${isTemplate}`)
 
       if (accountId && contactId) {
         if (isTemplate) {
           const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
           try {
-            await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '')
+            await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '', botRowId)
           } catch (e) {
-            // Log but don't fail — the message is already saved in DB
             console.error('[sendMessage] template delivery failed:', String(e))
           }
         } else {
@@ -85,7 +88,7 @@ serve(async (req: Request) => {
             } catch (e) { console.error('attachment upload failed', e) }
           }
           try {
-            await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments)
+            await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments, botRowId)
           } catch (e) {
             console.error('delivery failed, enqueuing', e)
             await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments })
