@@ -91,13 +91,27 @@ serve(async (req: Request) => {
         await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'noqtaChat' })
       }
 
+      // IM_SMILES_PANEL — template sender inside open channel chat window
+      const imTemplateUrl = `${appBaseUrl}/im-template`
+      await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'IM_SMILES_PANEL', HANDLER: imTemplateUrl })
+      const imBind = await callBitrix(endpoint, token, 'placement.bind', {
+        PLACEMENT: 'IM_SMILES_PANEL',
+        HANDLER: imTemplateUrl,
+        TITLE: 'noqtaChat Templates',
+        DESCRIPTION: 'Send WhatsApp template messages',
+      })
+      console.log(`[rebind] IM_SMILES_PANEL for ${account.name}:`, JSON.stringify(imBind))
+
       results.push({
         account: account.name,
         ok: lmBind?.result === true,
         dashboardUrl,
+        crmChatUrl,
+        imTemplateUrl,
         left_menu: lmBind?.result === true ? '✓' : (lmBind?.error_description || lmBind?.error || '?'),
         contact_center: ccBind?.result === true ? '✓' : (ccBind?.error_description || ccBind?.error || '?'),
         event_handler: eventBind?.result === true ? '✓' : (eventBind?.error_description || eventBind?.error || '?'),
+        im_smiles_panel: imBind?.result === true ? '✓' : (imBind?.error_description || imBind?.error || '?'),
       })
     }
 

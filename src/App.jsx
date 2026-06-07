@@ -18,6 +18,7 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import CrmChat from './pages/CrmChat';
+import ImTemplatePanel from './pages/ImTemplatePanel';
 import Onboarding from './pages/Onboarding';
 import AcceptInvite from './pages/AcceptInvite';
 import Team from './pages/Team';
@@ -65,6 +66,11 @@ const AuthenticatedApp = () => {
         {/* CRM Chat (org required) */}
         <Route path="/crm-chat" element={
           <RequireOrg><CrmChat /></RequireOrg>
+        } />
+
+        {/* IM Template Panel — Bitrix24 IM_SMILES_PANEL placement (org required) */}
+        <Route path="/im-template" element={
+          <RequireOrg><ImTemplatePanel /></RequireOrg>
         } />
 
         {/* Main dashboard (org required) */}

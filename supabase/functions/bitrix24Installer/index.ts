@@ -228,6 +228,18 @@ serve(async (req: Request) => {
           await callBitrix(serverEndpoint, accessToken, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'noqtaChat' })
         }
       }
+
+      // IM_SMILES_PANEL — template sender inside open channel chat window
+      const imTemplateUrl = isValidAppUrl ? `${appBaseUrl}/im-template` : ''
+      if (imTemplateUrl) {
+        await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'IM_SMILES_PANEL', HANDLER: imTemplateUrl })
+        await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
+          PLACEMENT: 'IM_SMILES_PANEL',
+          HANDLER: imTemplateUrl,
+          TITLE: 'noqtaChat Templates',
+          DESCRIPTION: 'Send WhatsApp template messages',
+        })
+      }
     }
 
     // ── SETTING_CONNECTOR / CONTACT_CENTER: activate connector for a line ────
