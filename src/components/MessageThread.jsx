@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
 import { MessageSquare, User } from "lucide-react";
@@ -59,6 +59,25 @@ export default function MessageThread({ conversation }) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
+
+  // Queue so rapid sends go out sequentially, not concurrently (prevents SP rate-limit drops)
+  const sendQueue = useRef([]);
+  const draining = useRef(false);
+
+  const drainQueue = useCallback(async () => {
+    if (draining.current) return;
+    draining.current = true;
+    while (sendQueue.current.length > 0) {
+      const payload = sendQueue.current.shift();
+      try { await sendMessage.mutateAsync(payload); } catch (_) {}
+    }
+    draining.current = false;
+  }, [sendMessage]);
+
+  const enqueueSend = useCallback((payload) => {
+    sendQueue.current.push(payload);
+    drainQueue();
+  }, [drainQueue]);
 
   const markRead = useMutation({
     mutationFn: (id) => base44.entities.Conversation.update(id, { unread_count: 0 }),
@@ -155,7 +174,7 @@ export default function MessageThread({ conversation }) {
 
       <MessageComposer
         conversation={conversation}
-        onSend={(payload) => sendMessage.mutateAsync(payload)}
+        onSend={enqueueSend}
         isSending={sendMessage.isPending}
         error={sendMessage.isError ? (sendMessage.error?.message || 'Failed to send') : null}
       />
