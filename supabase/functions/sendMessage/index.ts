@@ -64,9 +64,13 @@ serve(async (req: Request) => {
 
       if (accountId && contactId) {
         if (isTemplate) {
-          // Template message — use dedicated template API
           const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
-          await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '')
+          try {
+            await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '')
+          } catch (e) {
+            // Log but don't fail — the message is already saved in DB
+            console.error('[sendMessage] template delivery failed:', String(e))
+          }
         } else {
           const resolvedAttachments = []
           for (const att of (attachments || [])) {
@@ -89,8 +93,7 @@ serve(async (req: Request) => {
         }
       }
     } catch (e) {
-      console.error('SendPulse delivery error', e)
-      return jsonResponse({ ok: false, error: String(e) }, 500)
+      console.error('[sendMessage] delivery setup error:', e)
     }
 
     return jsonResponse({ ok: true, message: inserted })

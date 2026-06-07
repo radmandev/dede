@@ -117,13 +117,16 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     })
   }
 
+  // Language codes must be lowercase (e.g. "ar" not "AR")
+  const langCode = (templateLanguage || 'en').toLowerCase()
+
   const payload: any = {
     contact_id: contactId,
     message: {
       type: 'template',
       template: {
         name: templateName,
-        language: { code: templateLanguage || 'en' },
+        language: { code: langCode },
       },
     },
   }
@@ -131,14 +134,17 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     payload.message.template.components = components
   }
 
+  console.log(`[template] sending to contact=${contactId} name=${templateName} lang=${langCode} components=${JSON.stringify(components)}`)
+
   const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` },
     body: JSON.stringify(payload),
   })
-  const body = await r.text().catch(() => null)
-  if (!r.ok) throw new Error(`sendpulse template failed: ${r.status} ${body}`)
-  return { status: r.status, body }
+  const respBody = await r.text().catch(() => null)
+  console.log(`[template] sendpulse response: ${r.status} ${respBody}`)
+  if (!r.ok) throw new Error(`sendpulse template failed: ${r.status} ${respBody}`)
+  return { status: r.status, body: respBody }
 }
 
 export async function enqueueDelivery(supabase: any, opts: any) {
