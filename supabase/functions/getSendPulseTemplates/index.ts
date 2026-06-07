@@ -78,6 +78,7 @@ serve(async (req: Request) => {
           category: template.category || template.template?.category || '',
           headerType,
           paramCount,
+          bodyText,
         }
       })
       .filter((template) => template.name)

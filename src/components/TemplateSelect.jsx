@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Label } from "@/components/ui/label";
@@ -35,6 +36,15 @@ export default function TemplateSelect({ botId, selectedName, onSelect }) {
 
   const templates = data || [];
   const selectedTemplate = templates.find((t) => t.name === selectedName);
+
+  // Auto-select first template once loaded
+  const autoSelected = useRef(false);
+  useEffect(() => {
+    if (!autoSelected.current && templates.length > 0 && !selectedName) {
+      autoSelected.current = true;
+      onSelect(templates[0]);
+    }
+  }, [templates.length]); // eslint-disable-line
 
   return (
     <div className="space-y-1">

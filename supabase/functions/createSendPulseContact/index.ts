@@ -41,25 +41,33 @@ serve(async (req: Request) => {
     // Try to find existing contact by phone
     let contactId: string | null = null
     let contactName = name || normalizedPhone
+    const phoneDigits = normalizedPhone.replace(/^\+/, '') // e.g. "966531607223"
 
-    try {
-      const searchRes = await fetch(
-        `https://api.sendpulse.com/whatsapp/contacts?bot_id=${encodeURIComponent(bot.bot_id)}&search=${encodeURIComponent(normalizedPhone)}`,
-        { headers: { Authorization: `Bearer ${spToken}` } }
-      )
-      const searchData = await searchRes.json().catch(() => null)
-      console.log(`[createContact] search response: ${searchRes.status} ${JSON.stringify(searchData)}`)
-      const found = Array.isArray(searchData?.data) ? searchData.data[0] : Array.isArray(searchData) ? searchData[0] : null
-      if (found?.id) {
-        contactId = String(found.id)
-        contactName = found.name || found.first_name || contactName
-        console.log(`[createContact] found existing contact id=${contactId}`)
+    async function searchByPhone(query: string): Promise<string | null> {
+      try {
+        const res = await fetch(
+          `https://api.sendpulse.com/whatsapp/contacts?bot_id=${encodeURIComponent(bot.bot_id)}&search=${encodeURIComponent(query)}`,
+          { headers: { Authorization: `Bearer ${spToken}` } }
+        )
+        const data = await res.json().catch(() => null)
+        console.log(`[createContact] search(${query}) ${res.status} ${JSON.stringify(data)}`)
+        const found = Array.isArray(data?.data) ? data.data[0] : Array.isArray(data) ? data[0] : null
+        if (found?.id) {
+          contactName = found.name || found.first_name || contactName
+          return String(found.id)
+        }
+      } catch (e) {
+        console.warn('[createContact] search error:', e)
       }
-    } catch (e) {
-      console.warn('[createContact] search failed:', e)
+      return null
     }
 
-    // If no existing contact found, try to create one
+    // 1. Search with + prefix
+    contactId = await searchByPhone(normalizedPhone)
+    // 2. Search without + prefix (SP may store without it)
+    if (!contactId) contactId = await searchByPhone(phoneDigits)
+
+    // 3. Create contact in SP bot audience
     if (!contactId) {
       try {
         const createRes = await fetch('https://api.sendpulse.com/whatsapp/contacts', {
@@ -68,22 +76,30 @@ serve(async (req: Request) => {
           body: JSON.stringify({ bot_id: bot.bot_id, phone: normalizedPhone, name: contactName }),
         })
         const createData = await createRes.json().catch(() => null)
-        console.log(`[createContact] create response: ${createRes.status} ${JSON.stringify(createData)}`)
+        console.log(`[createContact] create ${createRes.status} ${JSON.stringify(createData)}`)
         const created = createData?.data || createData
         if (created?.id) {
           contactId = String(created.id)
           contactName = created.name || created.first_name || contactName
-          console.log(`[createContact] created contact id=${contactId}`)
+          console.log(`[createContact] created in SP audience id=${contactId}`)
+        } else {
+          // Create may fail if contact already exists (conflict) — retry search
+          console.warn('[createContact] create did not return id, retrying search')
+          contactId = await searchByPhone(normalizedPhone) || await searchByPhone(phoneDigits)
         }
       } catch (e) {
         console.warn('[createContact] create failed:', e)
+        // Last-chance search retry
+        contactId = await searchByPhone(normalizedPhone) || await searchByPhone(phoneDigits)
       }
     }
 
-    // Fall back to phone as the contact key if SP API didn't return an ID
+    // Fall back to phone number only as last resort — templates will use phone+bot_id send path
     if (!contactId) {
       contactId = normalizedPhone
-      console.log(`[createContact] using phone as contact key: ${contactId}`)
+      console.warn(`[createContact] WARNING: could not register in SP audience, using phone fallback: ${contactId}`)
+    } else {
+      console.log(`[createContact] SP audience contact id=${contactId}`)
     }
 
     // Resolve owner + org from bot

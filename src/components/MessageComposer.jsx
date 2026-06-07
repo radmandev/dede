@@ -91,6 +91,131 @@ function MediaDropzone({ mode, mediaFile, onFileChange, onClear, previewUrl }) {
   );
 }
 
+function parseTemplateBody(text) {
+  const parts = [];
+  const regex = /\{\{\s*(\d+)\s*\}\}/g;
+  let last = 0, m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push({ kind: "text", value: text.slice(last, m.index) });
+    parts.push({ kind: "var", idx: parseInt(m[1]) - 1 });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ kind: "text", value: text.slice(last) });
+  return parts;
+}
+
+function TemplateComposer({
+  conversation, templateName, templateBodyText, templateParams, templateHeaderType,
+  templateMediaFile, templateMediaPreview, uploading, canSend,
+  onSelect, onParamsChange, onMediaChange, onMediaClear, onSend,
+}) {
+  const parsedBody = templateBodyText ? parseTemplateBody(templateBodyText) : [];
+  const hasInlineVars = parsedBody.some((p) => p.kind === "var");
+
+  const setParam = (idx, val) => {
+    const next = [...templateParams];
+    // grow array if needed (user can add params beyond auto-detected count)
+    while (next.length <= idx) next.push("");
+    next[idx] = val;
+    onParamsChange(next);
+  };
+
+  return (
+    <div className="space-y-3">
+      <TemplateSelect
+        botId={conversation?.sendpulse_bot_id}
+        selectedName={templateName}
+        onSelect={onSelect}
+      />
+
+      {/* Header media upload */}
+      {["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType) && (
+        <div className="space-y-1">
+          <Label className="text-xs">
+            Header {templateHeaderType.charAt(0) + templateHeaderType.slice(1).toLowerCase()}
+            <span className="text-destructive ml-1">*</span>
+          </Label>
+          <MediaDropzone
+            mode={templateHeaderType === "IMAGE" ? "image" : "file"}
+            mediaFile={templateMediaFile}
+            onFileChange={onMediaChange}
+            onClear={onMediaClear}
+            previewUrl={templateMediaPreview}
+          />
+        </div>
+      )}
+
+      {/* Inline editable preview */}
+      {templateName && templateBodyText && (
+        <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+          <div className="px-3 pt-2 pb-1 border-b border-border/40">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Preview</span>
+          </div>
+          <div className="p-3 text-sm leading-relaxed" dir="auto">
+            {parsedBody.map((part, i) =>
+              part.kind === "text" ? (
+                <span key={i} className="whitespace-pre-wrap">{part.value}</span>
+              ) : (
+                <input
+                  key={i}
+                  value={templateParams[part.idx] ?? ""}
+                  onChange={(e) => setParam(part.idx, e.target.value)}
+                  placeholder={`{{${part.idx + 1}}}`}
+                  className="inline bg-primary/10 border-b-2 border-primary/40 hover:border-primary/60 focus:border-primary text-primary placeholder:text-primary/40 focus:outline-none px-1 mx-0.5 text-sm transition-colors rounded-sm"
+                  style={{ width: `${Math.max((templateParams[part.idx]?.length ?? 0) + 4, 8)}ch` }}
+                />
+              )
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fallback: separate param inputs when body text unavailable or has no vars */}
+      {templateName && !hasInlineVars && (
+        <div className="space-y-1">
+          <Label className="text-xs">Body Parameters</Label>
+          <div className="space-y-1.5">
+            {templateParams.map((p, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground w-8 text-right flex-shrink-0">{`{{${i + 1}}}`}</span>
+                <Input
+                  value={p}
+                  onChange={(e) => setParam(i, e.target.value)}
+                  placeholder={`Parameter ${i + 1}`}
+                  className="text-sm flex-1"
+                />
+                <button
+                  onClick={() => onParamsChange(templateParams.filter((_, j) => j !== i))}
+                  className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => onParamsChange([...templateParams, ""])}
+              className="text-xs text-primary hover:underline"
+            >
+              + Add parameter
+            </button>
+          </div>
+        </div>
+      )}
+
+      <Button onClick={onSend} disabled={!canSend()} className="w-full gap-2">
+        {uploading ? (
+          <>
+            <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            Uploading…
+          </>
+        ) : (
+          <><Send className="h-4 w-4" /> Send Template</>
+        )}
+      </Button>
+    </div>
+  );
+}
+
 export default function MessageComposer({ conversation, onSend, isSending, error }) {
   const [mode, setMode] = useState("text");
   const [text, setText] = useState("");
@@ -100,7 +225,8 @@ export default function MessageComposer({ conversation, onSend, isSending, error
   const [uploading, setUploading] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateLang, setTemplateLang] = useState("en");
-  const [templateParams, setTemplateParams] = useState([""]);
+  const [templateParams, setTemplateParams] = useState([]);
+  const [templateBodyText, setTemplateBodyText] = useState("");
   const [templateHeaderType, setTemplateHeaderType] = useState("NONE");
   const [templateMediaFile, setTemplateMediaFile] = useState(null);
   const [templateMediaPreview, setTemplateMediaPreview] = useState(null);
@@ -116,6 +242,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
     setTemplateName("");
     setTemplateLang("en");
     setTemplateParams([]);
+    setTemplateBodyText("");
     setTemplateHeaderType("NONE");
     if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
     setTemplateMediaFile(null);
@@ -279,92 +406,45 @@ export default function MessageComposer({ conversation, onSend, isSending, error
         )}
 
         {mode === "template" && (
-          <div className="space-y-3">
-            <TemplateSelect
-              botId={conversation?.sendpulse_bot_id}
-              selectedName={templateName}
-              onSelect={(t) => {
-                setTemplateName(t.name);
-                setTemplateLang(t.language || "en");
-                setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : []);
-                setTemplateHeaderType(t.headerType || "NONE");
+          <TemplateComposer
+            conversation={conversation}
+            templateName={templateName}
+            templateBodyText={templateBodyText}
+            templateParams={templateParams}
+            templateHeaderType={templateHeaderType}
+            templateMediaFile={templateMediaFile}
+            templateMediaPreview={templateMediaPreview}
+            uploading={uploading}
+            canSend={canSend}
+            onSelect={(t) => {
+              setTemplateName(t.name);
+              setTemplateLang(t.language || "en");
+              setTemplateBodyText(t.bodyText || "");
+              // Size params array to match detected count (from bodyText or paramCount)
+              const count = t.paramCount || 0;
+              setTemplateParams(count > 0 ? Array(count).fill("") : []);
+              setTemplateHeaderType(t.headerType || "NONE");
+              if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+              setTemplateMediaFile(null);
+              setTemplateMediaPreview(null);
+            }}
+            onParamsChange={setTemplateParams}
+            onMediaChange={(file) => {
+              setTemplateMediaFile(file);
+              if (file && templateHeaderType === "IMAGE" && file.type.startsWith("image/")) {
                 if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
-                setTemplateMediaFile(null);
+                setTemplateMediaPreview(URL.createObjectURL(file));
+              } else {
                 setTemplateMediaPreview(null);
-              }}
-            />
-            {["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType) && (
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  Header {templateHeaderType.charAt(0) + templateHeaderType.slice(1).toLowerCase()} <span className="text-destructive">*</span>
-                </Label>
-                <MediaDropzone
-                  mode={templateHeaderType === "IMAGE" ? "image" : templateHeaderType === "VIDEO" ? "file" : "file"}
-                  mediaFile={templateMediaFile}
-                  onFileChange={(file) => {
-                    setTemplateMediaFile(file);
-                    if (file && templateHeaderType === "IMAGE" && file.type.startsWith("image/")) {
-                      if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
-                      setTemplateMediaPreview(URL.createObjectURL(file));
-                    } else {
-                      setTemplateMediaPreview(null);
-                    }
-                  }}
-                  onClear={() => {
-                    if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
-                    setTemplateMediaFile(null);
-                    setTemplateMediaPreview(null);
-                  }}
-                  previewUrl={templateMediaPreview}
-                />
-              </div>
-            )}
-
-            {templateName && (
-            <div className="space-y-1">
-              <Label className="text-xs">Body Parameters</Label>
-              <div className="space-y-1.5">
-                {templateParams.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground w-8 text-right flex-shrink-0">{`{{${i + 1}}}`}</span>
-                    <Input
-                      value={p}
-                      onChange={(e) => {
-                        const next = [...templateParams];
-                        next[i] = e.target.value;
-                        setTemplateParams(next);
-                      }}
-                      placeholder={`Parameter ${i + 1}`}
-                      className="text-sm flex-1"
-                    />
-                    <button
-                      onClick={() => setTemplateParams(templateParams.filter((_, j) => j !== i))}
-                      className="text-muted-foreground hover:text-destructive flex-shrink-0"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => setTemplateParams([...templateParams, ""])}
-                  className="text-xs text-primary hover:underline"
-                >
-                  + Add parameter
-                </button>
-              </div>
-            </div>
-            )}
-            <Button onClick={handleSend} disabled={!canSend()} className="w-full gap-2">
-              {uploading ? (
-                <>
-                  <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Uploading…
-                </>
-              ) : (
-                <><Send className="h-4 w-4" /> Send Template</>
-              )}
-            </Button>
-          </div>
+              }
+            }}
+            onMediaClear={() => {
+              if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+              setTemplateMediaFile(null);
+              setTemplateMediaPreview(null);
+            }}
+            onSend={handleSend}
+          />
         )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}
