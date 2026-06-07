@@ -117,24 +117,6 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
   const spToken = await ensureSendPulseToken(supabase, accountId)
   if (!spToken) throw new Error('unable to obtain sendpulse token')
 
-  const components: any[] = []
-
-  const mediaHeaderType = (headerType || '').toUpperCase()
-  if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
-    const paramKey = mediaHeaderType === 'IMAGE' ? 'image' : mediaHeaderType === 'VIDEO' ? 'video' : 'document'
-    components.push({
-      type: 'header',
-      parameters: [{ type: mediaHeaderType.toLowerCase(), [paramKey]: { link: headerMediaUrl } }],
-    })
-  }
-
-  if (bodyParams && bodyParams.length > 0) {
-    components.push({
-      type: 'body',
-      parameters: bodyParams.map((text) => ({ type: 'text', text })),
-    })
-  }
-
   const langCode = (templateLanguage || 'en').toLowerCase()
 
   // Determine contact key: use phone+bot_id if contactId looks like a phone number
@@ -147,20 +129,29 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
+  // Build variables for header (media) and body (text params)
+  const variables: any = {}
+  const mediaHeaderType = (headerType || '').toUpperCase()
+  if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
+    variables.header = { type: mediaHeaderType.toLowerCase(), url: headerMediaUrl }
+  }
+  if (bodyParams && bodyParams.length > 0) {
+    variables.body = bodyParams
+  }
+
+  // SendPulse uses a dedicated sendTemplate endpoint — template is NOT a message.type
   const payload: any = {
     ...contactKey,
-    message: {
-      type: 'template',
-      template: { name: templateName, language: { code: langCode } },
+    template: {
+      name: templateName,
+      language: langCode,
+      ...(Object.keys(variables).length > 0 ? { variables } : {}),
     },
   }
-  if (components.length > 0) {
-    payload.message.template.components = components
-  }
 
-  console.log(`[template] sending ${usePhone ? `phone=${contactId} bot_id=${externalBotId}` : `contact_id=${contactId}`} name=${templateName} lang=${langCode} components=${JSON.stringify(components)}`)
+  console.log(`[template] POST sendTemplate ${usePhone ? `phone=${contactId} bot_id=${externalBotId}` : `contact_id=${contactId}`} name=${templateName} lang=${langCode} payload=${JSON.stringify(payload)}`)
 
-  const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/send', {
+  const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/sendTemplate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` },
     body: JSON.stringify(payload),
