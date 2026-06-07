@@ -88,7 +88,7 @@ serve(async (req: Request) => {
       for (const pl of crmPlacements) {
         await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: pl, HANDLER: dashboardUrl })
         await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: pl, HANDLER: crmChatUrl })
-        await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'WhatsApp Chat' })
+        await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'noqtaChat' })
       }
 
       results.push({

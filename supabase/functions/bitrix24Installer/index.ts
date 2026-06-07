@@ -225,7 +225,7 @@ serve(async (req: Request) => {
       if (crmChatUrl) {
         for (const pl of ['CRM_LEAD_DETAIL_TAB', 'CRM_DEAL_DETAIL_TAB', 'CRM_CONTACT_DETAIL_TAB', 'CRM_COMPANY_DETAIL_TAB']) {
           await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: pl, HANDLER: crmChatUrl })
-          await callBitrix(serverEndpoint, accessToken, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'WhatsApp Chat' })
+          await callBitrix(serverEndpoint, accessToken, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'noqtaChat' })
         }
       }
     }
