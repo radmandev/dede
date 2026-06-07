@@ -129,24 +129,31 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
-  // Build SP variables object (SP uses its own variables format, not WA-native components)
-  const variables: any = {}
+  // SP sendTemplate uses WA-native components format (confirmed working from logs)
+  const components: any[] = []
   const mediaHeaderType = (headerType || '').toUpperCase()
 
   if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
-    variables.header = { type: mediaHeaderType.toLowerCase(), url: headerMediaUrl }
+    const paramType = mediaHeaderType.toLowerCase()
+    components.push({
+      type: 'header',
+      parameters: [{ type: paramType, [paramType]: { link: headerMediaUrl } }],
+    })
   }
 
   if (bodyParams && bodyParams.length > 0) {
-    variables.body = bodyParams.map((value, i) => ({ key: String(i + 1), value }))
+    components.push({
+      type: 'body',
+      parameters: bodyParams.map((value) => ({ type: 'text', text: value })),
+    })
   }
 
   const payload: any = {
     ...contactKey,
     template: {
       name: templateName,
-      language: { code: langCode },
-      ...(Object.keys(variables).length > 0 ? { variables } : {}),
+      language: { policy: 'deterministic', code: langCode },
+      ...(components.length > 0 ? { components } : {}),
     },
   }
 
