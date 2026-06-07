@@ -129,31 +129,24 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
-  // Build WhatsApp-native components array
-  const components: any[] = []
+  // Build SP variables object (SP uses its own variables format, not WA-native components)
+  const variables: any = {}
   const mediaHeaderType = (headerType || '').toUpperCase()
 
   if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
-    const paramType = mediaHeaderType.toLowerCase() as 'image' | 'video' | 'document'
-    components.push({
-      type: 'header',
-      parameters: [{ type: paramType, [paramType]: { link: headerMediaUrl } }],
-    })
+    variables.header = { type: mediaHeaderType.toLowerCase(), url: headerMediaUrl }
   }
 
   if (bodyParams && bodyParams.length > 0) {
-    components.push({
-      type: 'body',
-      parameters: bodyParams.map((value) => ({ type: 'text', text: value })),
-    })
+    variables.body = bodyParams.map((value, i) => ({ key: String(i + 1), value }))
   }
 
   const payload: any = {
     ...contactKey,
     template: {
       name: templateName,
-      language: { policy: 'deterministic', code: langCode },
-      ...(components.length > 0 ? { components } : {}),
+      language: { code: langCode },
+      ...(Object.keys(variables).length > 0 ? { variables } : {}),
     },
   }
 
