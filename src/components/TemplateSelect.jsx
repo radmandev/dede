@@ -2,7 +2,26 @@ import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Image, Video, FileText, Type, AlignLeft } from "lucide-react";
+
+const HEADER_META = {
+  IMAGE:    { label: "Image",    icon: Image,    color: "text-blue-500" },
+  VIDEO:    { label: "Video",    icon: Video,    color: "text-purple-500" },
+  DOCUMENT: { label: "Document", icon: FileText,  color: "text-amber-500" },
+  TEXT:     { label: "Text hdr", icon: Type,      color: "text-muted-foreground" },
+  NONE:     { label: "Text",     icon: AlignLeft, color: "text-muted-foreground" },
+};
+
+export function HeaderTypeBadge({ headerType }) {
+  const meta = HEADER_META[headerType] || HEADER_META.NONE;
+  const Icon = meta.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide ${meta.color}`}>
+      <Icon className="h-3 w-3" />
+      {meta.label}
+    </span>
+  );
+}
 
 export default function TemplateSelect({ botId, selectedName, onSelect }) {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -15,6 +34,7 @@ export default function TemplateSelect({ botId, selectedName, onSelect }) {
   });
 
   const templates = data || [];
+  const selectedTemplate = templates.find((t) => t.name === selectedName);
 
   return (
     <div className="space-y-1">
@@ -38,15 +58,24 @@ export default function TemplateSelect({ botId, selectedName, onSelect }) {
         disabled={isLoading || templates.length === 0}
       >
         <SelectTrigger className="text-sm">
-          <SelectValue placeholder={isLoading ? "Loading templates…" : "Select a template"} />
+          {selectedTemplate ? (
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="truncate">{selectedTemplate.name}</span>
+              <HeaderTypeBadge headerType={selectedTemplate.headerType} />
+              <span className="text-xs text-muted-foreground uppercase flex-shrink-0">{selectedTemplate.language}</span>
+            </div>
+          ) : (
+            <SelectValue placeholder={isLoading ? "Loading templates…" : "Select a template"} />
+          )}
         </SelectTrigger>
         <SelectContent>
           {templates.map((t) => (
             <SelectItem key={t.name} value={t.name}>
-              <span className="flex items-center gap-2">
-                <span>{t.name}</span>
-                <span className="text-xs text-muted-foreground uppercase">{t.language}</span>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="truncate">{t.name}</span>
+                <HeaderTypeBadge headerType={t.headerType} />
+                <span className="text-xs text-muted-foreground uppercase flex-shrink-0">{t.language}</span>
+              </div>
             </SelectItem>
           ))}
         </SelectContent>

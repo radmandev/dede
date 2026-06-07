@@ -101,6 +101,9 @@ export default function MessageComposer({ conversation, onSend, isSending, error
   const [templateName, setTemplateName] = useState("");
   const [templateLang, setTemplateLang] = useState("en");
   const [templateParams, setTemplateParams] = useState([""]);
+  const [templateHeaderType, setTemplateHeaderType] = useState("NONE");
+  const [templateMediaFile, setTemplateMediaFile] = useState(null);
+  const [templateMediaPreview, setTemplateMediaPreview] = useState(null);
 
   const channel = conversation?.channel || "whatsapp";
   const isWhatsApp = channel === "whatsapp";
@@ -113,6 +116,10 @@ export default function MessageComposer({ conversation, onSend, isSending, error
     setTemplateName("");
     setTemplateLang("en");
     setTemplateParams([""]);
+    setTemplateHeaderType("NONE");
+    if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+    setTemplateMediaFile(null);
+    setTemplateMediaPreview(null);
   };
 
   const handleFileChange = (file) => {
@@ -159,11 +166,24 @@ export default function MessageComposer({ conversation, onSend, isSending, error
       await uploadAndSend();
     } else if (mode === "template") {
       if (!templateName.trim()) return;
+      let mediaUrl = "";
+      const needsMedia = ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType);
+      if (needsMedia && templateMediaFile) {
+        setUploading(true);
+        try {
+          const { path } = await base44.storage.uploadAttachment(templateMediaFile);
+          mediaUrl = base44.storage.getPublicUrl(path);
+        } finally {
+          setUploading(false);
+        }
+      }
       await onSend({
         message_type: "template",
         template_name: templateName.trim(),
         template_language: templateLang.trim() || "en",
         template_params: templateParams.filter((p) => p.trim()),
+        template_header_type: templateHeaderType,
+        template_media_url: mediaUrl,
         message_text: "",
       });
       resetForm();
@@ -173,7 +193,12 @@ export default function MessageComposer({ conversation, onSend, isSending, error
   const canSend = () => {
     if (isSending || uploading) return false;
     if (mode === "text") return text.trim().length > 0;
-    if (mode === "template") return templateName.trim().length > 0;
+    if (mode === "template") {
+      if (!templateName.trim()) return false;
+      const needsMedia = ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType);
+      if (needsMedia && !templateMediaFile) return false;
+      return true;
+    }
     return !!mediaFile;
   };
 
@@ -262,8 +287,39 @@ export default function MessageComposer({ conversation, onSend, isSending, error
                 setTemplateName(t.name);
                 setTemplateLang(t.language || "en");
                 setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : [""]);
+                setTemplateHeaderType(t.headerType || "NONE");
+                if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+                setTemplateMediaFile(null);
+                setTemplateMediaPreview(null);
               }}
             />
+            {["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType) && (
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  Header {templateHeaderType.charAt(0) + templateHeaderType.slice(1).toLowerCase()} <span className="text-destructive">*</span>
+                </Label>
+                <MediaDropzone
+                  mode={templateHeaderType === "IMAGE" ? "image" : templateHeaderType === "VIDEO" ? "file" : "file"}
+                  mediaFile={templateMediaFile}
+                  onFileChange={(file) => {
+                    setTemplateMediaFile(file);
+                    if (file && templateHeaderType === "IMAGE" && file.type.startsWith("image/")) {
+                      if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+                      setTemplateMediaPreview(URL.createObjectURL(file));
+                    } else {
+                      setTemplateMediaPreview(null);
+                    }
+                  }}
+                  onClear={() => {
+                    if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
+                    setTemplateMediaFile(null);
+                    setTemplateMediaPreview(null);
+                  }}
+                  previewUrl={templateMediaPreview}
+                />
+              </div>
+            )}
+
             <div className="space-y-1">
               <Label className="text-xs">Body Parameters (one per line, in order)</Label>
               <div className="space-y-1.5">
@@ -299,7 +355,14 @@ export default function MessageComposer({ conversation, onSend, isSending, error
               </div>
             </div>
             <Button onClick={handleSend} disabled={!canSend()} className="w-full gap-2">
-              <Send className="h-4 w-4" /> Send Template
+              {uploading ? (
+                <>
+                  <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                <><Send className="h-4 w-4" /> Send Template</>
+              )}
             </Button>
           </div>
         )}

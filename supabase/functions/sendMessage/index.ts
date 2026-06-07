@@ -1,7 +1,7 @@
 import { handleCors, jsonResponse, textResponse } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
-import { performSendPulseDelivery, enqueueDelivery } from '../lib/sendpulse.ts'
+import { performSendPulseDelivery, enqueueDelivery, sendTemplateMessage } from '../lib/sendpulse.ts'
 import { uploadRemoteAttachment } from '../lib/storage.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -16,21 +16,29 @@ serve(async (req: Request) => {
     if (req.method !== 'POST') return textResponse('method not allowed', 405)
 
     const body = await req.json().catch(() => null)
-    const { conversation_id, text: rawText, message_text, attachments, sendpulse_account_id } = body || {}
+    const {
+      conversation_id, text: rawText, message_text, attachments, sendpulse_account_id,
+      message_type, template_name, template_language, template_params, template_header_type, template_media_url,
+    } = body || {}
     const text = rawText || message_text || ''
+    const isTemplate = message_type === 'template'
 
     // Persist outbound message
-    // Fetch conversation channel before inserting so we can store it on the message
     let convChannel: string | null = null
+    let convRow: any = null
     if (conversation_id) {
-      const { data: convRow } = await supabase.from('conversations').select('channel').eq('id', conversation_id).limit(1).single()
-      convChannel = convRow?.channel || null
+      const { data: cr } = await supabase.from('conversations').select('*').eq('id', conversation_id).limit(1).single()
+      convRow = cr
+      convChannel = cr?.channel || null
     }
+
+    const savedText = isTemplate ? (template_name || '') : (text || null)
+    const savedType = isTemplate ? 'template' : (attachments?.length ? 'file' : 'text')
 
     const { data: inserted, error } = await supabase.from('messages').insert([{
       conversation_id: conversation_id || null,
-      message_text: text || null,
-      message_type: attachments?.length ? 'file' : 'text',
+      message_text: savedText,
+      message_type: savedType,
       direction: 'outbound',
       channel: convChannel,
     }]).select().limit(1).single()
@@ -46,39 +54,43 @@ serve(async (req: Request) => {
       let contactId = null
       let channel = body?.channel || null
 
-      if (conversation_id) {
-        const { data: conv } = await supabase.from('conversations').select('*').eq('id', conversation_id).limit(1)
-        if (conv?.[0]) {
-          if (!accountId) accountId = conv[0].sendpulse_account_id
-          contactId = conv[0].sendpulse_contact_id
-          if (!channel) channel = conv[0].channel
-        }
+      if (convRow) {
+        if (!accountId) accountId = convRow.sendpulse_account_id
+        contactId = convRow.sendpulse_contact_id
+        if (!channel) channel = convRow.channel
       }
       if (!contactId && body?.contact_id) contactId = body.contact_id
       channel = channel || 'live_chat'
 
       if (accountId && contactId) {
-        const resolvedAttachments = []
-        for (const att of (attachments || [])) {
-          if (!att?.link) continue
+        if (isTemplate) {
+          // Template message — use dedicated template API
+          const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
+          await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '')
+        } else {
+          const resolvedAttachments = []
+          for (const att of (attachments || [])) {
+            if (!att?.link) continue
+            try {
+              if (!att.link.includes('/storage/v1/object/')) {
+                const uploaded = await uploadRemoteAttachment(supabase, att.link)
+                resolvedAttachments.push({ link: uploaded.url, name: uploaded.filename, type: att.type || 'document' })
+              } else {
+                resolvedAttachments.push(att)
+              }
+            } catch (e) { console.error('attachment upload failed', e) }
+          }
           try {
-            if (!att.link.includes('/storage/v1/object/')) {
-              const uploaded = await uploadRemoteAttachment(supabase, att.link)
-              resolvedAttachments.push({ link: uploaded.url, name: uploaded.filename, type: att.type || 'document' })
-            } else {
-              resolvedAttachments.push(att)
-            }
-          } catch (e) { console.error('attachment upload failed', e) }
-        }
-        try {
-          await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments)
-        } catch (e) {
-          console.error('delivery failed, enqueuing', e)
-          await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments })
+            await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments)
+          } catch (e) {
+            console.error('delivery failed, enqueuing', e)
+            await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments })
+          }
         }
       }
     } catch (e) {
       console.error('SendPulse delivery error', e)
+      return jsonResponse({ ok: false, error: String(e) }, 500)
     }
 
     return jsonResponse({ ok: true, message: inserted })

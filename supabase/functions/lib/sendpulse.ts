@@ -93,6 +93,54 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
   return results
 }
 
+export async function sendTemplateMessage(supabase: any, accountId: string, contactId: string, templateName: string, templateLanguage: string, bodyParams: string[], headerType: string, headerMediaUrl: string) {
+  const spToken = await ensureSendPulseToken(supabase, accountId)
+  if (!spToken) throw new Error('unable to obtain sendpulse token')
+
+  const components: any[] = []
+
+  // Header component — only for media headers
+  const mediaHeaderType = (headerType || '').toUpperCase()
+  if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
+    const paramKey = mediaHeaderType === 'IMAGE' ? 'image' : mediaHeaderType === 'VIDEO' ? 'video' : 'document'
+    components.push({
+      type: 'header',
+      parameters: [{ type: mediaHeaderType.toLowerCase(), [paramKey]: { link: headerMediaUrl } }],
+    })
+  }
+
+  // Body component — only when there are variable params
+  if (bodyParams && bodyParams.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyParams.map((text) => ({ type: 'text', text })),
+    })
+  }
+
+  const payload: any = {
+    contact_id: contactId,
+    message: {
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: templateLanguage || 'en' },
+      },
+    },
+  }
+  if (components.length > 0) {
+    payload.message.template.components = components
+  }
+
+  const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` },
+    body: JSON.stringify(payload),
+  })
+  const body = await r.text().catch(() => null)
+  if (!r.ok) throw new Error(`sendpulse template failed: ${r.status} ${body}`)
+  return { status: r.status, body }
+}
+
 export async function enqueueDelivery(supabase: any, opts: any) {
   const accountId = opts.sendpulse_account_id || null
   const conversationId = opts.conversation_id || null

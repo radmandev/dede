@@ -52,18 +52,24 @@ serve(async (req: Request) => {
         const status = (template.status || template.template?.status || '').toString().toUpperCase()
         return !status || status === 'APPROVED' || status === 'ACTIVE'
       })
-      .map((template) => ({
-        name: template.name || template.template?.name,
-        language: template.language || template.language_code || template.template?.language || 'en',
-        category: template.category || template.template?.category || '',
-        paramCount: (() => {
-          const comps = template.components || template.template?.components || []
-          const body = (Array.isArray(comps) ? comps : []).find((c) => (c.type || '').toString().toUpperCase() === 'BODY')
-          const text = body?.text || ''
-          const matches = text.match(/\{\{\s*\d+\s*\}\}/g)
-          return matches ? new Set(matches).size : 0
-        })(),
-      }))
+      .map((template) => {
+        const comps = template.components || template.template?.components || []
+        const compList = Array.isArray(comps) ? comps : []
+        const bodyComp = compList.find((c) => (c.type || '').toString().toUpperCase() === 'BODY')
+        const headerComp = compList.find((c) => (c.type || '').toString().toUpperCase() === 'HEADER')
+        const bodyText = bodyComp?.text || ''
+        const paramMatches = bodyText.match(/\{\{\s*\d+\s*\}\}/g)
+        const headerFormat = (headerComp?.format || '').toString().toUpperCase()
+        // NONE = no header, TEXT = text header, IMAGE/VIDEO/DOCUMENT = media header
+        const headerType = headerComp ? (headerFormat || 'TEXT') : 'NONE'
+        return {
+          name: template.name || template.template?.name,
+          language: template.language || template.language_code || template.template?.language || 'en',
+          category: template.category || template.template?.category || '',
+          headerType,
+          paramCount: paramMatches ? new Set(paramMatches).size : 0,
+        }
+      })
       .filter((template) => template.name)
 
     return makeJsonResponse({ templates })
