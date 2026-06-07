@@ -129,24 +129,31 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
-  // Build variables for header (media) and body (text params)
-  // SendPulse expects body params as [{key:"1",value:"..."}, ...] not plain strings
-  const variables: any = {}
+  // Build WhatsApp-native components array
+  const components: any[] = []
   const mediaHeaderType = (headerType || '').toUpperCase()
+
   if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
-    variables.header = { type: mediaHeaderType.toLowerCase(), url: headerMediaUrl }
-  }
-  if (bodyParams && bodyParams.length > 0) {
-    variables.body = bodyParams.map((value, i) => ({ key: String(i + 1), value }))
+    const paramType = mediaHeaderType.toLowerCase() as 'image' | 'video' | 'document'
+    components.push({
+      type: 'header',
+      parameters: [{ type: paramType, [paramType]: { link: headerMediaUrl } }],
+    })
   }
 
-  // SendPulse uses a dedicated sendTemplate endpoint — template is NOT a message.type
+  if (bodyParams && bodyParams.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyParams.map((value) => ({ type: 'text', text: value })),
+    })
+  }
+
   const payload: any = {
     ...contactKey,
     template: {
       name: templateName,
-      language: { code: langCode },
-      ...(Object.keys(variables).length > 0 ? { variables } : {}),
+      language: { policy: 'deterministic', code: langCode },
+      ...(components.length > 0 ? { components } : {}),
     },
   }
 
