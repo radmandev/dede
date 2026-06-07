@@ -144,7 +144,7 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     ...contactKey,
     template: {
       name: templateName,
-      language: [{ code: langCode }],
+      language: { code: langCode },
       ...(Object.keys(variables).length > 0 ? { variables } : {}),
     },
   }
