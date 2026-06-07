@@ -320,13 +320,13 @@ export default function MessageComposer({ conversation, onSend, isSending, error
               </div>
             )}
 
-            {templateParams.length > 0 && (
+            {templateName && (
             <div className="space-y-1">
               <Label className="text-xs">Body Parameters</Label>
               <div className="space-y-1.5">
                 {templateParams.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground w-6 text-right">{`{{${i + 1}}}`}</span>
+                    <span className="text-xs text-muted-foreground w-8 text-right flex-shrink-0">{`{{${i + 1}}}`}</span>
                     <Input
                       value={p}
                       onChange={(e) => {
@@ -337,14 +337,12 @@ export default function MessageComposer({ conversation, onSend, isSending, error
                       placeholder={`Parameter ${i + 1}`}
                       className="text-sm flex-1"
                     />
-                    {templateParams.length > 1 && (
-                      <button
-                        onClick={() => setTemplateParams(templateParams.filter((_, j) => j !== i))}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setTemplateParams(templateParams.filter((_, j) => j !== i))}
+                      className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 ))}
                 <button

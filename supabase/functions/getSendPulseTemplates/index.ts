@@ -54,6 +54,7 @@ serve(async (req: Request) => {
     }
 
     const raw = Array.isArray(data) ? data : (data.data || data.templates || [])
+    console.log(`[getSendPulseTemplates] raw count=${Array.isArray(raw) ? raw.length : 0} sample=${JSON.stringify(raw?.[0]).slice(0, 400)}`)
     const templates = (Array.isArray(raw) ? raw : [])
       .filter((template) => {
         const status = (template.status || template.template?.status || '').toString().toUpperCase()
@@ -66,15 +67,17 @@ serve(async (req: Request) => {
         const headerComp = compList.find((c) => (c.type || '').toString().toUpperCase() === 'HEADER')
         const bodyText = bodyComp?.text || ''
         const paramMatches = bodyText.match(/\{\{\s*\d+\s*\}\}/g)
+        const paramCount = paramMatches ? new Set(paramMatches).size : 0
         const headerFormat = (headerComp?.format || '').toString().toUpperCase()
-        // NONE = no header, TEXT = text header, IMAGE/VIDEO/DOCUMENT = media header
         const headerType = headerComp ? (headerFormat || 'TEXT') : 'NONE'
+        const name = template.name || template.template?.name
+        console.log(`[template] name=${name} bodyText=${bodyText.slice(0,80)} paramCount=${paramCount} headerType=${headerType}`)
         return {
-          name: template.name || template.template?.name,
+          name,
           language: template.language || template.language_code || template.template?.language || 'en',
           category: template.category || template.template?.category || '',
           headerType,
-          paramCount: paramMatches ? new Set(paramMatches).size : 0,
+          paramCount,
         }
       })
       .filter((template) => template.name)
