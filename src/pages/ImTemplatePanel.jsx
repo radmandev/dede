@@ -118,7 +118,8 @@ export default function ImTemplatePanel() {
         if (dead) return;
         try {
           const info = window.BX24.placement.info();
-          const dialogId = info?.options?.DIALOG_ID || info?.options?.dialog_id || "";
+          // IM_TEXTAREA sends dialogId (camelCase); legacy fallbacks for other placements
+          const dialogId = info?.options?.dialogId || info?.options?.DIALOG_ID || info?.options?.dialog_id || "";
           console.log("[ImTemplate] DIALOG_ID:", dialogId, "placement:", info?.placement);
 
           // Parse numeric chat ID from formats: "chat17", "17", "imol/5/17"

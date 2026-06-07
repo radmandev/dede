@@ -229,15 +229,18 @@ serve(async (req: Request) => {
         }
       }
 
-      // IM_SMILES_PANEL — template sender inside open channel chat window
+      // IM_TEXTAREA — template sender button in the open channel chat compose bar
       const imTemplateUrl = isValidAppUrl ? `${appBaseUrl}/im-template` : ''
       if (imTemplateUrl) {
+        // Clean up the old (invalid) placement name if it was registered
         await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'IM_SMILES_PANEL', HANDLER: imTemplateUrl })
+        await callBitrix(serverEndpoint, accessToken, 'placement.unbind', { PLACEMENT: 'IM_TEXTAREA', HANDLER: imTemplateUrl })
         await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
-          PLACEMENT: 'IM_SMILES_PANEL',
+          PLACEMENT: 'IM_TEXTAREA',
           HANDLER: imTemplateUrl,
           TITLE: 'noqtaChat Templates',
           DESCRIPTION: 'Send WhatsApp template messages',
+          OPTIONS: { context: 'LINES' },
         })
       }
     }

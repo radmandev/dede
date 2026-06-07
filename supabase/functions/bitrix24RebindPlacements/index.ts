@@ -91,16 +91,19 @@ serve(async (req: Request) => {
         await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'noqtaChat' })
       }
 
-      // IM_SMILES_PANEL — template sender inside open channel chat window
+      // IM_TEXTAREA — template sender button in the open channel chat compose bar
       const imTemplateUrl = `${appBaseUrl}/im-template`
+      // Remove old (invalid) placement registrations
       await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'IM_SMILES_PANEL', HANDLER: imTemplateUrl })
+      await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'IM_TEXTAREA', HANDLER: imTemplateUrl })
       const imBind = await callBitrix(endpoint, token, 'placement.bind', {
-        PLACEMENT: 'IM_SMILES_PANEL',
+        PLACEMENT: 'IM_TEXTAREA',
         HANDLER: imTemplateUrl,
         TITLE: 'noqtaChat Templates',
         DESCRIPTION: 'Send WhatsApp template messages',
+        OPTIONS: { context: 'LINES' },
       })
-      console.log(`[rebind] IM_SMILES_PANEL for ${account.name}:`, JSON.stringify(imBind))
+      console.log(`[rebind] IM_TEXTAREA for ${account.name}:`, JSON.stringify(imBind))
 
       results.push({
         account: account.name,
