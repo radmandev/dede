@@ -133,7 +133,7 @@ serve(async (req: Request) => {
     const isValidAppUrl = appBaseUrl && !appBaseUrl.includes('/functions/v1')
     console.log(`[installer] appBaseUrl=${appBaseUrl} isValid=${isValidAppUrl}`)
     const dashboardUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
-    const crmChatUrl = isValidAppUrl ? `${appBaseUrl}/` : ''
+    const crmChatUrl = isValidAppUrl ? `${appBaseUrl}/crm-chat` : ''
 
     // Build serverEndpoint — try referer first, then POST body fields
     const referer = req.headers.get('referer') || req.headers.get('origin') || ''

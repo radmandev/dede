@@ -1,7 +1,7 @@
-import { handleCors } from '../lib/cors.ts'
+import { handleCors, jsonResponse } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
-import { loadFirstGlobalConfig, normalizeConfigRow, callBitrix, ensureBitrixToken } from '../lib/bitrix24.ts'
+import { normalizeConfigRow, callBitrix, ensureBitrixToken } from '../lib/bitrix24.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -24,18 +24,19 @@ serve(async (req: Request) => {
     const appBaseUrl = rawBaseUrl.replace(/^https:\/\/preview--/, 'https://').replace(/\/+$/, '')
 
     if (!appBaseUrl || appBaseUrl.includes('/functions/v1')) {
-      return makeJsonResponse({ error: 'app_base_url is not set or is invalid. Set it in Settings first.' }, 400)
+      return jsonResponse({ error: 'app_base_url is not set or is invalid. Set it in Settings first.' }, 400)
     }
 
     const functionsBase = `${SUPABASE_URL}/functions/v1`
     const installerUrl = `${functionsBase}/bitrix24Installer`
     const handlerUrl = `${functionsBase}/bitrix24Handler`
     const dashboardUrl = `${appBaseUrl}/`
+    const crmChatUrl = `${appBaseUrl}/crm-chat`
 
     const { data: accounts = [], error: accountErr } = await supabase
       .from('bitrix24_accounts').select('*').eq('status', 'connected')
     if (accountErr) throw accountErr
-    if (!accounts.length) return makeJsonResponse({ error: 'No connected Bitrix24 portals found.' }, 404)
+    if (!accounts.length) return jsonResponse({ error: 'No connected Bitrix24 portals found.' }, 404)
 
     const results = []
     for (const account of accounts) {
@@ -82,11 +83,12 @@ serve(async (req: Request) => {
         TITLE: 'WhatsApp (SendPulse)',
       })
 
-      // CRM detail tab placements
+      // CRM detail tab placements — point to /crm-chat, not the dashboard root
       const crmPlacements = ['CRM_LEAD_DETAIL_TAB', 'CRM_DEAL_DETAIL_TAB', 'CRM_CONTACT_DETAIL_TAB', 'CRM_COMPANY_DETAIL_TAB']
       for (const pl of crmPlacements) {
         await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: pl, HANDLER: dashboardUrl })
-        await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: dashboardUrl, TITLE: 'WhatsApp Chat' })
+        await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: pl, HANDLER: crmChatUrl })
+        await callBitrix(endpoint, token, 'placement.bind', { PLACEMENT: pl, HANDLER: crmChatUrl, TITLE: 'WhatsApp Chat' })
       }
 
       results.push({
@@ -99,9 +101,9 @@ serve(async (req: Request) => {
       })
     }
 
-    return makeJsonResponse({ success: true, dashboardUrl, results })
+    return jsonResponse({ success: true, dashboardUrl, crmChatUrl, results })
   } catch (error) {
     console.error('bitrix24RebindPlacements error:', error)
-    return makeJsonResponse({ error: String(error) }, 500)
+    return jsonResponse({ error: String(error) }, 500)
   }
 })
