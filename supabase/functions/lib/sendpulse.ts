@@ -130,13 +130,14 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     : { contact_id: contactId }
 
   // Build variables for header (media) and body (text params)
+  // SendPulse expects body params as [{key:"1",value:"..."}, ...] not plain strings
   const variables: any = {}
   const mediaHeaderType = (headerType || '').toUpperCase()
   if ((mediaHeaderType === 'IMAGE' || mediaHeaderType === 'VIDEO' || mediaHeaderType === 'DOCUMENT') && headerMediaUrl) {
     variables.header = { type: mediaHeaderType.toLowerCase(), url: headerMediaUrl }
   }
   if (bodyParams && bodyParams.length > 0) {
-    variables.body = bodyParams
+    variables.body = bodyParams.map((value, i) => ({ key: String(i + 1), value }))
   }
 
   // SendPulse uses a dedicated sendTemplate endpoint — template is NOT a message.type

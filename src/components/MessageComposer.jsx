@@ -115,7 +115,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
     setPreviewUrl(null);
     setTemplateName("");
     setTemplateLang("en");
-    setTemplateParams([""]);
+    setTemplateParams([]);
     setTemplateHeaderType("NONE");
     if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
     setTemplateMediaFile(null);
@@ -286,7 +286,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
               onSelect={(t) => {
                 setTemplateName(t.name);
                 setTemplateLang(t.language || "en");
-                setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : [""]);
+                setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : []);
                 setTemplateHeaderType(t.headerType || "NONE");
                 if (templateMediaPreview) URL.revokeObjectURL(templateMediaPreview);
                 setTemplateMediaFile(null);
@@ -320,8 +320,9 @@ export default function MessageComposer({ conversation, onSend, isSending, error
               </div>
             )}
 
+            {templateParams.length > 0 && (
             <div className="space-y-1">
-              <Label className="text-xs">Body Parameters (one per line, in order)</Label>
+              <Label className="text-xs">Body Parameters</Label>
               <div className="space-y-1.5">
                 {templateParams.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
@@ -354,6 +355,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
                 </button>
               </div>
             </div>
+            )}
             <Button onClick={handleSend} disabled={!canSend()} className="w-full gap-2">
               {uploading ? (
                 <>
