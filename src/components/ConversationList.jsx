@@ -1,14 +1,16 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, Inbox } from "lucide-react";
+import { Search, Inbox, SquarePen } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/api/base44Client";
 import ConversationCard from "./ConversationCard";
 import StatusFilter from "./StatusFilter";
+import NewChatDialog from "./NewChatDialog";
 
-export default function ConversationList({ conversations, selectedId, onSelect }) {
+export default function ConversationList({ conversations, selectedId, onSelect, onNewConversation }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const counts = useMemo(() => {
@@ -31,17 +33,35 @@ export default function ConversationList({ conversations, selectedId, onSelect }
 
   return (
     <div className="flex flex-col h-full bg-card">
-      <div className="p-4 border-b border-border">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search conversations..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-9 bg-muted/50 border-0 text-sm"
-          />
+      <div className="p-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search conversations..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 h-9 bg-muted/50 border-0 text-sm"
+            />
+          </div>
+          <button
+            onClick={() => setNewChatOpen(true)}
+            className="h-9 w-9 flex items-center justify-center rounded-md hover:bg-accent transition-colors flex-shrink-0"
+            title="New conversation"
+          >
+            <SquarePen className="h-4 w-4 text-muted-foreground" />
+          </button>
         </div>
       </div>
+
+      <NewChatDialog
+        open={newChatOpen}
+        onClose={() => setNewChatOpen(false)}
+        onConversationCreated={(conv) => {
+          setNewChatOpen(false);
+          if (onNewConversation) onNewConversation(conv);
+        }}
+      />
 
       <StatusFilter activeFilter={statusFilter} onFilterChange={setStatusFilter} counts={counts} />
 

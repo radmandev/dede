@@ -59,6 +59,13 @@ export default function Dashboard() {
           conversations={conversations}
           selectedId={currentConv?.id}
           onSelect={setSelectedConv}
+          onNewConversation={(conv) => {
+            // Inject into cache if not already present, then select it
+            queryClient.setQueryData(["conversations"], (old = []) =>
+              old.find((c) => c.id === conv.id) ? old : [conv, ...old]
+            );
+            setSelectedConv(conv);
+          }}
         />
       </div>
 
