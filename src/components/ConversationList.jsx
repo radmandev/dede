@@ -1,16 +1,18 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, Inbox, SquarePen } from "lucide-react";
+import { Search, Inbox, SquarePen, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/api/base44Client";
 import ConversationCard from "./ConversationCard";
 import StatusFilter from "./StatusFilter";
 import NewChatDialog from "./NewChatDialog";
+import SendTemplateDialog from "./SendTemplateDialog";
 
 export default function ConversationList({ conversations, selectedId, onSelect, onNewConversation }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [sendTemplateOpen, setSendTemplateOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const counts = useMemo(() => {
@@ -45,6 +47,13 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
             />
           </div>
           <button
+            onClick={() => setSendTemplateOpen(true)}
+            className="h-9 w-9 flex items-center justify-center rounded-md hover:bg-accent transition-colors flex-shrink-0"
+            title="Send template to new contact"
+          >
+            <Zap className="h-4 w-4 text-muted-foreground" />
+          </button>
+          <button
             onClick={() => setNewChatOpen(true)}
             className="h-9 w-9 flex items-center justify-center rounded-md hover:bg-accent transition-colors flex-shrink-0"
             title="New conversation"
@@ -59,6 +68,15 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
         onClose={() => setNewChatOpen(false)}
         onConversationCreated={(conv) => {
           setNewChatOpen(false);
+          if (onNewConversation) onNewConversation(conv);
+        }}
+      />
+
+      <SendTemplateDialog
+        open={sendTemplateOpen}
+        onClose={() => setSendTemplateOpen(false)}
+        onConversationCreated={(conv) => {
+          setSendTemplateOpen(false);
           if (onNewConversation) onNewConversation(conv);
         }}
       />

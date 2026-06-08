@@ -73,7 +73,8 @@ serve(async (req: Request) => {
         const createRes = await fetch('https://api.sendpulse.com/whatsapp/contacts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${spToken}` },
-          body: JSON.stringify({ bot_id: bot.bot_id, phone: normalizedPhone, name: contactName }),
+          // SP expects phone in E.164 WITHOUT leading +
+          body: JSON.stringify({ bot_id: bot.bot_id, phone: phoneDigits, name: contactName }),
         })
         const createData = await createRes.json().catch(() => null)
         console.log(`[createContact] create ${createRes.status} ${JSON.stringify(createData)}`)
@@ -94,9 +95,9 @@ serve(async (req: Request) => {
       }
     }
 
-    // Fall back to phone number only as last resort — templates will use phone+bot_id send path
+    // Fall back to digits-only phone as last resort — SP expects E.164 without +
     if (!contactId) {
-      contactId = normalizedPhone
+      contactId = phoneDigits
       console.warn(`[createContact] WARNING: could not register in SP audience, using phone fallback: ${contactId}`)
     } else {
       console.log(`[createContact] SP audience contact id=${contactId}`)

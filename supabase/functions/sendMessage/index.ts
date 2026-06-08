@@ -69,10 +69,13 @@ serve(async (req: Request) => {
       if (accountId && contactId) {
         if (isTemplate) {
           const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
-          try {
-            await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '', botRowId)
-          } catch (e) {
-            console.error('[sendMessage] template delivery failed:', String(e))
+          const deliveryResult = await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '', botRowId)
+            .catch((e: any) => ({ error: String(e) }))
+          if ((deliveryResult as any)?.error) {
+            console.error('[sendMessage] template delivery failed:', (deliveryResult as any).error)
+            // Update message status to reflect delivery failure
+            await supabase.from('messages').update({ message_text: `[delivery failed] ${template_name}` }).eq('id', inserted?.id)
+            return jsonResponse({ ok: false, error: (deliveryResult as any).error, message: inserted }, 200)
           }
         } else {
           const resolvedAttachments = []

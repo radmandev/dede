@@ -57,8 +57,10 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
     externalBotId = await resolveExternalBotId(supabase, botRowId)
     console.log(`[delivery] phone-based send phone=${contactId} bot_id=${externalBotId}`)
   }
+  // SP expects phone in E.164 WITHOUT leading +
+  const spPhone = contactId.replace(/^\+/, '')
   const contactKey = usePhone
-    ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
+    ? { phone: spPhone, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
   // Build payload — each channel has its own API shape
@@ -125,8 +127,10 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
   if (usePhone) {
     externalBotId = await resolveExternalBotId(supabase, botRowId)
   }
+  // SP expects phone in E.164 WITHOUT leading +
+  const spPhone = contactId.replace(/^\+/, '')
   const contactKey = usePhone
-    ? { phone: contactId, ...(externalBotId ? { bot_id: externalBotId } : {}) }
+    ? { phone: spPhone, ...(externalBotId ? { bot_id: externalBotId } : {}) }
     : { contact_id: contactId }
 
   // SP sendTemplate uses WA-native components format (confirmed working from logs)
@@ -157,9 +161,15 @@ export async function sendTemplateMessage(supabase: any, accountId: string, cont
     },
   }
 
-  console.log(`[template] POST sendTemplate ${usePhone ? `phone=${contactId} bot_id=${externalBotId}` : `contact_id=${contactId}`} name=${templateName} lang=${langCode} payload=${JSON.stringify(payload)}`)
+  // Use the correct endpoint: sendTemplateByPhone when we only have a phone number,
+  // sendTemplate when we have a resolved SP contact_id.
+  const endpoint = usePhone
+    ? 'https://api.sendpulse.com/whatsapp/contacts/sendTemplateByPhone'
+    : 'https://api.sendpulse.com/whatsapp/contacts/sendTemplate'
 
-  const r = await fetch('https://api.sendpulse.com/whatsapp/contacts/sendTemplate', {
+  console.log(`[template] POST ${endpoint} ${usePhone ? `phone=${contactId} bot_id=${externalBotId}` : `contact_id=${contactId}`} name=${templateName} lang=${langCode} payload=${JSON.stringify(payload)}`)
+
+  const r = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spToken}` },
     body: JSON.stringify(payload),
