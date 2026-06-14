@@ -42,6 +42,7 @@ async function resolveFileAttachments(endpoint: string, token: string, fileIds: 
 }
 
 serve(async (req: Request) => {
+  console.log(`[b24handler] ${req.method} ${req.url}`)
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   try {

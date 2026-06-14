@@ -58,11 +58,21 @@ serve(async (req: Request) => {
       // ONIMCONNECTORMESSAGEADD event — rebind outgoing message handler
       const existingEventsRes = await callBitrix(endpoint, token, 'event.get', {})
       const existingHandlers = Array.isArray(existingEventsRes?.result) ? existingEventsRes.result : []
-      for (const h of existingHandlers.filter((h: any) => h.event === 'ONIMCONNECTORMESSAGEADD')) {
-        await callBitrix(endpoint, token, 'event.unbind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: h.handler })
+      const existingImConnectorHandlers = existingHandlers.filter((h: any) => h.event === 'ONIMCONNECTORMESSAGEADD')
+      console.log(`[rebind] existing ONIMCONNECTORMESSAGEADD handlers:`, JSON.stringify(existingImConnectorHandlers))
+      for (const h of existingImConnectorHandlers) {
+        const unbind = await callBitrix(endpoint, token, 'event.unbind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: h.handler })
+        console.log(`[rebind] unbind ${h.handler}:`, JSON.stringify(unbind))
       }
       const eventBind = await callBitrix(endpoint, token, 'event.bind', { EVENT: 'ONIMCONNECTORMESSAGEADD', HANDLER: handlerUrl })
       console.log(`[rebind] event.bind for ${account.name}:`, JSON.stringify(eventBind))
+
+      // Verify registration immediately after binding
+      const verifyEventsRes = await callBitrix(endpoint, token, 'event.get', {})
+      const verifyHandlers = Array.isArray(verifyEventsRes?.result) ? verifyEventsRes.result : []
+      const registeredEventHandlers = verifyHandlers
+        .filter((h: any) => h.event === 'ONIMCONNECTORMESSAGEADD')
+        .map((h: any) => h.handler)
 
       // CONTACT_CENTER placement
       await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'CONTACT_CENTER', HANDLER: installerUrl })
@@ -120,12 +130,15 @@ serve(async (req: Request) => {
       results.push({
         account: account.name,
         ok: lmBind?.result === true,
+        handlerUrl,
         dashboardUrl,
         crmChatUrl,
         imTemplateUrl,
         left_menu: lmBind?.result === true ? '✓' : (lmBind?.error_description || lmBind?.error || '?'),
         contact_center: ccBind?.result === true ? '✓' : (ccBind?.error_description || ccBind?.error || '?'),
-        event_handler: eventBind?.result === true ? '✓' : (eventBind?.error_description || eventBind?.error || '?'),
+        event_bind: eventBind?.result === true ? '✓' : (eventBind?.error_description || eventBind?.error || JSON.stringify(eventBind)),
+        event_registered_handlers: registeredEventHandlers,
+        event_handler_matches: registeredEventHandlers.includes(handlerUrl),
         im_textarea: imBind?.result === true ? '✓' : (imBind?.error_description || imBind?.error || JSON.stringify(imBind)),
         im_textarea_registered: registeredImPlacements,
       })
