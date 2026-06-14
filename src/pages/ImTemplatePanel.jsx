@@ -210,13 +210,15 @@ function VoiceRecorder({ onSend, onCancel }) {
       let ext = mimeToExt(mimeRef.current);
       let uploadMime = mimeForUpload(mimeRef.current);
 
-      if (mimeRef.current.includes("webm")) {
+      // Only OGG/Opus (Firefox) is confirmed to work with SP→WhatsApp.
+      // Convert Chrome webm AND Safari m4a to MP3 (audio/mpeg).
+      if (!mimeRef.current.includes("ogg")) {
         try {
           uploadBlob = await convertWebmToMp3(blobRef.current);
           ext = "mp3";
           uploadMime = "audio/mpeg";
         } catch (convErr) {
-          console.error("webm→mp3 conversion failed:", convErr);
+          console.error("audio→mp3 conversion failed:", convErr);
         }
       }
 
