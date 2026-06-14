@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { base44, supabase } from "@/api/base44Client";
+import { Mp3Encoder } from "lamejs";
 import { Send, CheckCircle2, AlertCircle, Loader2, RefreshCw, X, Mic, FileText, Trash2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,6 +99,30 @@ function WaveformBars() {
   );
 }
 
+async function convertWebmToMp3(webmBlob) {
+  const arrayBuffer = await webmBlob.arrayBuffer();
+  const audioCtx = new AudioContext();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  await audioCtx.close();
+  const sampleRate = audioBuffer.sampleRate;
+  const pcm = audioBuffer.getChannelData(0);
+  const encoder = new Mp3Encoder(1, sampleRate, 128);
+  const blockSize = 1152;
+  const chunks = [];
+  for (let i = 0; i < pcm.length; i += blockSize) {
+    const slice = pcm.subarray(i, i + blockSize);
+    const int16 = new Int16Array(slice.length);
+    for (let j = 0; j < slice.length; j++) {
+      int16[j] = Math.max(-32768, Math.min(32767, slice[j] * 32767));
+    }
+    const buf = encoder.encodeBuffer(int16);
+    if (buf.length > 0) chunks.push(new Uint8Array(buf));
+  }
+  const tail = encoder.flush();
+  if (tail.length > 0) chunks.push(new Uint8Array(tail));
+  return new Blob(chunks, { type: "audio/mpeg" });
+}
+
 function getSupportedMimeType() {
   const types = ["audio/ogg;codecs=opus", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
   return types.find((t) => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) || "";
@@ -181,10 +206,22 @@ function VoiceRecorder({ onSend, onCancel }) {
     if (!blobRef.current) return;
     setUploading(true);
     try {
-      const ext = mimeToExt(mimeRef.current);
-      const uploadMime = mimeForUpload(mimeRef.current);
-      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
-      const { path } = await base44.storage.uploadAttachment(file);
+      let uploadBlob = blobRef.current;
+      let ext = mimeToExt(mimeRef.current);
+      let uploadMime = mimeForUpload(mimeRef.current);
+
+      if (mimeRef.current.includes("webm")) {
+        try {
+          uploadBlob = await convertWebmToMp3(blobRef.current);
+          ext = "mp3";
+          uploadMime = "audio/mpeg";
+        } catch (convErr) {
+          console.error("webm→mp3 conversion failed:", convErr);
+        }
+      }
+
+      const file = new File([uploadBlob], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
+      const { path } = await base44.storage.uploadAttachment(file, { contentType: uploadMime });
       const publicUrl = base44.storage.getPublicUrl(path);
       await onSend({ message_type: "audio", media_url: publicUrl || "", media_name: file.name, message_text: "" });
       if (blobUrl) URL.revokeObjectURL(blobUrl);

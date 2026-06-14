@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Image, Paperclip, Mic, FileText, X, Upload, Plus, Trash2, Square, AlertCircle } from "lucide-react";
+import { Mp3Encoder } from "lamejs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -61,6 +62,35 @@ function mimeForUpload(recordedMime) {
   // WhatsApp accepts audio/ogg. Chrome records webm/opus — relabel so SP sends it as audio not document.
   if (recordedMime.includes('ogg') || recordedMime.includes('mp4')) return recordedMime;
   return 'audio/ogg'; // webm with Opus → relabeled as ogg
+}
+
+// Chrome records audio/webm which WhatsApp rejects. Decode to PCM via
+// AudioContext then re-encode to MP3 (audio/mpeg) which WA accepts.
+async function convertWebmToMp3(webmBlob) {
+  const arrayBuffer = await webmBlob.arrayBuffer();
+  const audioCtx = new AudioContext();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  await audioCtx.close();
+
+  const sampleRate = audioBuffer.sampleRate;
+  const pcm = audioBuffer.getChannelData(0); // mono
+  const encoder = new Mp3Encoder(1, sampleRate, 128);
+  const blockSize = 1152;
+  const chunks = [];
+
+  for (let i = 0; i < pcm.length; i += blockSize) {
+    const slice = pcm.subarray(i, i + blockSize);
+    const int16 = new Int16Array(slice.length);
+    for (let j = 0; j < slice.length; j++) {
+      int16[j] = Math.max(-32768, Math.min(32767, slice[j] * 32767));
+    }
+    const buf = encoder.encodeBuffer(int16);
+    if (buf.length > 0) chunks.push(new Uint8Array(buf));
+  }
+  const tail = encoder.flush();
+  if (tail.length > 0) chunks.push(new Uint8Array(tail));
+
+  return new Blob(chunks, { type: 'audio/mpeg' });
 }
 
 function formatDuration(secs) {
@@ -133,9 +163,22 @@ function VoiceRecorder({ onSend, onCancel }) {
     if (!blobRef.current) return;
     setUploading(true);
     try {
-      const ext = mimeToExt(mimeRef.current);
-      const uploadMime = mimeForUpload(mimeRef.current);
-      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
+      let uploadBlob = blobRef.current;
+      let ext = mimeToExt(mimeRef.current);
+      let uploadMime = mimeForUpload(mimeRef.current);
+
+      // Chrome records audio/webm — WhatsApp rejects it. Convert to MP3.
+      if (mimeRef.current.includes('webm')) {
+        try {
+          uploadBlob = await convertWebmToMp3(blobRef.current);
+          ext = 'mp3';
+          uploadMime = 'audio/mpeg';
+        } catch (convErr) {
+          console.error('webm→mp3 conversion failed, uploading as webm:', convErr);
+        }
+      }
+
+      const file = new File([uploadBlob], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
       const { path } = await base44.storage.uploadAttachment(file, { contentType: uploadMime });
       const publicUrl = base44.storage.getPublicUrl(path);
       await onSend({ message_type: 'audio', media_url: publicUrl || '', media_name: file.name, message_text: '' });
