@@ -106,17 +106,23 @@ serve(async (req: Request) => {
           if (!att?.link) continue
           try {
             if (att.link.includes('/storage/v1/object/public/')) {
-              // Create a signed URL so external services can access regardless of bucket policy
+              // Once the bucket is public the URL works directly. If still private, fall back to signed URL.
               const bucketMatch = att.link.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)/)
               if (bucketMatch) {
                 const [, bucketName, storagePath] = bucketMatch
-                const { data: signedData, error: signErr } = await supabase.storage
-                  .from(bucketName).createSignedUrl(storagePath, 604800) // 7 days
-                const signedUrl = signedData?.signedUrl
-                console.log(`[sendMessage] signed url bucket=${bucketName} path=${storagePath} ok=${!!signedUrl} err=${signErr?.message}`)
-                delivery.signedUrl = signedUrl ? signedUrl.substring(0, 120) + '…' : null
-                delivery.signErr = signErr?.message || null
-                resolvedAttachments.push({ link: signedUrl || att.link, name: att.name, type: att.type || 'document' })
+                const headRes = await fetch(att.link, { method: 'HEAD' }).catch(() => null)
+                let finalUrl = att.link
+                if (!headRes || !headRes.ok) {
+                  const { data: signedData, error: signErr } = await supabase.storage
+                    .from(bucketName).createSignedUrl(storagePath, 604800)
+                  finalUrl = signedData?.signedUrl || att.link
+                  console.log(`[sendMessage] public url not accessible (${headRes?.status}), signed ok=${!!signedData?.signedUrl} err=${signErr?.message}`)
+                  delivery.signErr = signErr?.message || `public-url-${headRes?.status}`
+                } else {
+                  console.log(`[sendMessage] public url accessible for ${storagePath}`)
+                }
+                delivery.signedUrl = finalUrl.substring(0, 120) + '…'
+                resolvedAttachments.push({ link: finalUrl, name: att.name, type: att.type || 'document' })
               } else {
                 resolvedAttachments.push(att)
               }
