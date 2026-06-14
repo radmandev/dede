@@ -99,14 +99,19 @@ function WaveformBars() {
 }
 
 function getSupportedMimeType() {
-  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  const types = ["audio/ogg;codecs=opus", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
   return types.find((t) => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) || "";
 }
 
 function mimeToExt(mime) {
   if (mime.includes("ogg")) return "ogg";
   if (mime.includes("mp4")) return "m4a";
-  return "webm";
+  return "ogg"; // Chrome webm/opus → relabel as ogg for WhatsApp compatibility
+}
+
+function mimeForUpload(recordedMime) {
+  if (recordedMime.includes("ogg") || recordedMime.includes("mp4")) return recordedMime;
+  return "audio/ogg"; // webm/Opus → relabeled as ogg/Opus
 }
 
 function formatDuration(secs) {
@@ -177,7 +182,8 @@ function VoiceRecorder({ onSend, onCancel }) {
     setUploading(true);
     try {
       const ext = mimeToExt(mimeRef.current);
-      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: blobRef.current.type });
+      const uploadMime = mimeForUpload(mimeRef.current);
+      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
       const { path } = await base44.storage.uploadAttachment(file);
       const publicUrl = base44.storage.getPublicUrl(path);
       await onSend({ message_type: "audio", media_url: publicUrl || "", media_name: file.name, message_text: "" });

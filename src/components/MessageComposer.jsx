@@ -40,10 +40,10 @@ function WaveformBars() {
 
 function getSupportedMimeType() {
   const types = [
-    'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',  // Firefox — native OGG Opus, WhatsApp-compatible
+    'audio/mp4',              // Safari
+    'audio/webm;codecs=opus', // Chrome fallback
     'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/mp4',
   ];
   return types.find((t) => {
     try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
@@ -53,7 +53,14 @@ function getSupportedMimeType() {
 function mimeToExt(mime) {
   if (mime.includes('ogg')) return 'ogg';
   if (mime.includes('mp4')) return 'm4a';
-  return 'webm';
+  // Chrome produces webm — rename to ogg so WhatsApp treats it as audio (Opus codec is the same)
+  return 'ogg';
+}
+
+function mimeForUpload(recordedMime) {
+  // WhatsApp accepts audio/ogg. Chrome records webm/opus — relabel so SP sends it as audio not document.
+  if (recordedMime.includes('ogg') || recordedMime.includes('mp4')) return recordedMime;
+  return 'audio/ogg'; // webm with Opus → relabeled as ogg
 }
 
 function formatDuration(secs) {
@@ -127,9 +134,8 @@ function VoiceRecorder({ onSend, onCancel }) {
     setUploading(true);
     try {
       const ext = mimeToExt(mimeRef.current);
-      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, {
-        type: blobRef.current.type,
-      });
+      const uploadMime = mimeForUpload(mimeRef.current);
+      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
       const { path } = await base44.storage.uploadAttachment(file);
       const publicUrl = base44.storage.getPublicUrl(path);
       await onSend({ message_type: 'audio', media_url: publicUrl || '', media_name: file.name, message_text: '' });

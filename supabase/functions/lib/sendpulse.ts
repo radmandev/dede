@@ -87,7 +87,8 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
     if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
       return { ...contactKey, message: { type: 'image', image: { link: attLink } } }
     }
-    if (attType === 'audio' || /\.(mp3|ogg|wav|m4a|webm|weba|opus)$/i.test(attName)) {
+    if (attType === 'audio' || /\.(mp3|ogg|wav|m4a|weba|opus)$/i.test(attName)) {
+      // WhatsApp supports: aac, mp4, mpeg, amr, ogg(Opus). webm is not supported — falls through to document.
       return { ...contactKey, message: { type: 'audio', audio: { link: attLink } } }
     }
     return { ...contactKey, message: { type: 'document', document: { link: attLink, filename: attName } } }
