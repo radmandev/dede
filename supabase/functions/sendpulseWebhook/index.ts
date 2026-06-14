@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+import { sendToBitrix24 } from '../lib/bitrix24.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -116,134 +117,6 @@ async function reHostMedia(opts: {
   throw new Error('all media fetch strategies failed')
 }
 
-// ---------- Bitrix24 helpers ----------
-
-// Upload a file to Bitrix24 Disk so FILES can reference a native Bitrix24 URL.
-// Bitrix24 silently drops external URLs in FILES (files:[]) but works fine with its own Disk URLs.
-async function refreshBitrix24Token(account: any) {
-  if (!account.app_client_id || !account.app_client_secret || !account.refresh_token) return null
-  const res = await fetch('https://oauth.bitrix.info/oauth/token/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: account.app_client_id,
-      client_secret: account.app_client_secret,
-      refresh_token: account.refresh_token,
-    }),
-  })
-  const data = await res.json()
-  if (data?.access_token) {
-    await supabase.from('bitrix24_accounts').update({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token || account.refresh_token,
-      token_expires_at: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
-    }).eq('id', account.id)
-  }
-  return data
-}
-
-async function sendToBitrix24(
-  account: any, channelCfg: any, conversation: any,
-  messageText: string, messageId: string, msgType: string,
-  mediaUrl: string, mediaFilename: string, contactPhone: string
-) {
-  // Repair domain if bitrix24Handler stored a generic OAuth server URL instead of the portal URL
-  const isOAuthServer = (ep: string) => ep.includes('oauth.bitrix.info') || ep.includes('oauth.bitrix24.tech')
-  let accountDomain = account.domain || ''
-  if (isOAuthServer(accountDomain) && account.name) {
-    const host = account.name.includes('.') ? account.name : null
-    if (host) {
-      accountDomain = `https://${host}/rest/`
-      await supabase.from('bitrix24_accounts').update({ domain: accountDomain }).eq('id', account.id)
-      console.log(`[b24] repaired corrupted domain to ${accountDomain}`)
-    }
-  }
-  if (!accountDomain || isOAuthServer(accountDomain) || !channelCfg.bitrix24_line_id) return
-
-  let token = account.access_token
-  const expires = account.token_expires_at ? new Date(account.token_expires_at) : null
-  const needsRefresh = !token || !expires || expires < new Date(Date.now() + 30000)
-  console.log(`[b24] token check: hasToken=${!!token} expires=${expires?.toISOString()} needsRefresh=${needsRefresh} hasClientId=${!!account.app_client_id} hasClientSecret=${!!account.app_client_secret} hasRefreshToken=${!!account.refresh_token}`)
-  if (needsRefresh) {
-    const refreshed = await refreshBitrix24Token(account)
-    if (refreshed?.access_token) {
-      token = refreshed.access_token
-      console.log('[b24] token refreshed successfully')
-    } else {
-      console.warn('[b24] token refresh failed — attempting with current token anyway')
-      // Try with current token even if expired (Bitrix24 may still accept briefly)
-      if (!token) { console.error('[b24] no token at all — giving up'); return }
-    }
-  }
-
-  const CONNECTOR_ID = channelCfg.bitrix24_connector_id || 'whatsapp_sendpulse'
-  const LINE_ID = Number(channelCfg.bitrix24_line_id)
-  const endpoint = accountDomain.endsWith('/') ? accountDomain : accountDomain + '/'
-  console.log(`[b24] forwarding to connector=${CONNECTOR_ID} line=${LINE_ID} domain=${accountDomain}`)
-
-  const unixNow = Math.floor(Date.now() / 1000)
-  const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
-
-  // Phone: prefer current message phone, fallback to conversation record
-  const phone = contactPhone || conversation.contact_phone || ''
-
-  const msgItem: any = {
-    user: {
-      id: String(conversation.sendpulse_contact_id),
-      name: conversation.contact_name || 'Customer',
-      phone,
-      avatar: '',
-      online: true,
-    },
-    message: messageObj,
-    chat: { id: String(conversation.sendpulse_contact_id) },
-  }
-
-  if (mediaUrl) {
-    const isImage = msgType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaFilename || '')
-    const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
-    const label = isImage ? 'image' : isAudio ? 'audio' : 'file'
-    console.log(`[b24] media BBCode: label=${label} url=${mediaUrl.substring(0, 120)}`)
-    // [URL=url]label[/URL] renders as a clickable link in Bitrix24 open channels
-    const mediaTag = `[URL=${mediaUrl}]${label}[/URL]`
-    messageObj.text = messageText ? `${messageText}\n${mediaTag}` : mediaTag
-  }
-
-  const payload = {
-    CONNECTOR: CONNECTOR_ID,
-    LINE: LINE_ID,
-    MESSAGES: [msgItem],
-  }
-
-  const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  const result = await res.json()
-  if (result?.error) {
-    console.error('[b24] imconnector.send.messages error:', JSON.stringify(result))
-  } else {
-    const msgResult = result?.result?.DATA?.RESULT?.[0] || result?.result?.[0] || result?.result
-    console.log('[b24] sent ok, files in result:', JSON.stringify(msgResult?.message?.files ?? msgResult?.files ?? 'n/a'))
-    if (mediaUrl) console.log('[b24] full result:', JSON.stringify(result?.result).substring(0, 500))
-  }
-
-  const returnedChatId =
-    result?.result?.DATA?.RESULT_SESSION?.CHAT_ID ||       // primary: session-level chat ID
-    result?.result?.DATA?.RESULT_MESSAGE?.[0]?.chat_id ||  // per-message chat_id
-    result?.result?.DATA?.RESULT_MESSAGE?.[0]?.CHAT_ID ||  // uppercase variant
-    result?.result?.DATA?.RESULT?.[0]?.session?.CHAT_ID || // nested session
-    result?.result?.[0]?.chat_id ||
-    result?.result?.chat_id
-  console.log(`[b24] imconnector result keys: ${JSON.stringify(Object.keys(result?.result?.DATA || {}))} returnedChatId=${returnedChatId}`)
-  if (returnedChatId && String(conversation.bitrix24_chat_id) !== String(returnedChatId)) {
-    await supabase.from('conversations').update({ bitrix24_chat_id: Number(returnedChatId) }).eq('id', conversation.id)
-    console.log(`[b24] updated bitrix24_chat_id=${returnedChatId} for conv=${conversation.id}`)
-  }
-}
-
 // ---------- Main handler ----------
 
 serve(async (req: Request) => {
@@ -347,8 +220,62 @@ serve(async (req: Request) => {
     const mediaPreviewText = msgType === 'image' ? '📷 Image' : msgType === 'audio' ? '🎵 Audio' : msgType === 'file' ? '📎 File' : ''
     const effectiveText = messageText || (mediaUrl ? mediaPreviewText : '')
 
-    // Skip outbound echoes — stored by bitrix24Handler
-    if (direction === 'outbound') return json({ success: true, skipped: 'outbound' })
+    // Outbound messages (sent by agent in SendPulse or WhatsApp app):
+    // save to noqtaChat and forward to Bitrix24, but skip if already stored by sendMessage/bitrix24Handler
+    if (direction === 'outbound') {
+      if (messageId) {
+        const { data: existing } = await supabase.from('messages').select('id').eq('sendpulse_message_id', messageId).limit(1)
+        if (existing && existing.length > 0) return json({ success: true, skipped: 'duplicate' })
+      }
+
+      // Look up or find conversation by contactId
+      const { data: convRows } = await supabase.from('conversations').select('*').eq('sendpulse_contact_id', contactId).limit(1)
+      const outboundConv = convRows?.[0]
+      if (!outboundConv) return json({ success: true, skipped: 'no-conversation' })
+
+      // Stamp sendpulse_message_id on a recent noqtaChat-sent message without one (echo dedup)
+      if (messageId && (messageText || effectiveText)) {
+        const since = new Date(Date.now() - 120000).toISOString()
+        const { data: recent } = await supabase.from('messages')
+          .select('id').eq('conversation_id', outboundConv.id).eq('direction', 'outbound')
+          .is('sendpulse_message_id', null).gte('sent_at', since).limit(1)
+        if (recent && recent.length > 0) {
+          await supabase.from('messages').update({ sendpulse_message_id: messageId }).eq('id', recent[0].id)
+          // Still forward to Bitrix24 in case sendMessage didn't (e.g. no channel linked yet at that point)
+          const { data: cfgs } = await supabase.from('bitrix24_open_channels').select('*').eq('sendpulse_bot_id', botUuid || '').limit(1)
+          const channelCfg = cfgs?.[0]
+          if (channelCfg?.bitrix24_account_id) {
+            const { data: accs } = await supabase.from('bitrix24_accounts').select('*').eq('id', channelCfg.bitrix24_account_id).limit(1)
+            const bxAccount = accs?.[0]
+            if (bxAccount) await sendToBitrix24(supabase, bxAccount, channelCfg, outboundConv, messageText, messageId, msgType, mediaUrl, mediaFilename, contactPhone).catch(() => {})
+          }
+          return json({ success: true, skipped: 'echo-stamped' })
+        }
+      }
+
+      // Pure SendPulse-sent message — save and forward
+      const { data: cfgs } = await supabase.from('bitrix24_open_channels').select('*').eq('sendpulse_bot_id', botUuid || '').limit(1)
+      const channelCfg = cfgs?.[0]
+      if (channelCfg?.bitrix24_account_id) {
+        const { data: accs } = await supabase.from('bitrix24_accounts').select('*').eq('id', channelCfg.bitrix24_account_id).limit(1)
+        const bxAccount = accs?.[0]
+        if (bxAccount) await sendToBitrix24(supabase, bxAccount, channelCfg, outboundConv, messageText, messageId, msgType, mediaUrl, mediaFilename, contactPhone).catch(() => {})
+      }
+      await supabase.from('messages').insert([{
+        conversation_id: outboundConv.id,
+        sendpulse_message_id: messageId || null,
+        sender_name: 'Agent',
+        message_text: messageText || null,
+        message_type: msgType,
+        media_url: mediaUrl || null,
+        media_name: mediaFilename || null,
+        direction: 'outbound',
+        channel,
+        sent_at: new Date().toISOString(),
+      }]).catch((e: any) => console.error('[webhook] outbound insert error:', e))
+      await supabase.from('conversations').update({ last_message_text: effectiveText.substring(0, 200), last_message_at: new Date().toISOString() }).eq('id', outboundConv.id).catch(() => {})
+      return json({ success: true, outbound: 'saved' })
+    }
 
     // Dedup: skip if already stored
     if (messageId) {
@@ -550,7 +477,7 @@ serve(async (req: Request) => {
 
     if (conversation?.id && bxAccount && channelCfg) {
       tasks.push(
-        sendToBitrix24(bxAccount, channelCfg, conversation, messageText, messageId, msgType, finalMediaUrl, effectiveFilename, contactPhone)
+        sendToBitrix24(supabase, bxAccount, channelCfg, conversation, messageText, messageId, msgType, finalMediaUrl, effectiveFilename, contactPhone)
           .catch((bxErr: any) => console.error('[webhook] Bitrix24 forward error:', bxErr))
       )
     }

@@ -87,7 +87,7 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
     if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
       return { ...contactKey, message: { type: 'image', image: { link: attLink } } }
     }
-    if (attType === 'audio' || /\.(mp3|ogg|wav|m4a)$/i.test(attName)) {
+    if (attType === 'audio' || /\.(mp3|ogg|wav|m4a|webm|weba|opus)$/i.test(attName)) {
       return { ...contactKey, message: { type: 'audio', audio: { link: attLink } } }
     }
     return { ...contactKey, message: { type: 'document', document: { link: attLink, filename: attName } } }
@@ -107,8 +107,10 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
     const attName = att.name || 'file'
     if (!attLink) continue
     const spPayload = buildAttachPayload(attType, attLink, attName)
+    console.log(`[sp] attach payload type=${attType} name=${attName} url=${attLink.substring(0, 80)}`)
     const r = await fetch(spUrl, { method: 'POST', headers: spHeaders, body: JSON.stringify(spPayload) })
     const body = await r.text().catch(() => null)
+    console.log(`[sp] attach response status=${r.status} body=${(body || '').substring(0, 200)}`)
     if (!r.ok) throw new Error(`sendpulse attach failed: ${r.status} ${body}`)
     results.push({ type: 'attach', status: r.status, body })
   }

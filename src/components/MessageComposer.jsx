@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import { Send, Image, Paperclip, Mic, FileText, X, Upload, Plus } from "lucide-react";
+// @ts-nocheck
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Image, Paperclip, Mic, FileText, X, Upload, Plus, Trash2, Square, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -7,11 +8,207 @@ import { Label } from "@/components/ui/label";
 import { base44 } from "@/api/base44Client";
 import TemplateSelect from "./TemplateSelect";
 
+// ── Voice note waveform animation ─────────────────────────────────────────
+const WAVE_STYLE = `
+  @keyframes voice-wave {
+    0%, 100% { transform: scaleY(0.25); }
+    50%       { transform: scaleY(1);    }
+  }
+`;
+
+const WAVE_DELAYS = ['0s', '0.12s', '0.24s', '0.36s', '0.24s', '0.12s', '0s'];
+
+function WaveformBars() {
+  return (
+    <>
+      <style>{WAVE_STYLE}</style>
+      <div className="flex items-center gap-[3px] h-6">
+        {WAVE_DELAYS.map((delay, i) => (
+          <div
+            key={i}
+            className="w-[3px] bg-red-500 rounded-full origin-center"
+            style={{
+              height: '100%',
+              animation: `voice-wave 0.8s ease-in-out ${delay} infinite`,
+            }}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function getSupportedMimeType() {
+  const types = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ];
+  return types.find((t) => {
+    try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+  }) || '';
+}
+
+function mimeToExt(mime) {
+  if (mime.includes('ogg')) return 'ogg';
+  if (mime.includes('mp4')) return 'm4a';
+  return 'webm';
+}
+
+function formatDuration(secs) {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// phase: 'recording' | 'preview'
+function VoiceRecorder({ onSend, onCancel }) {
+  const [phase, setPhase] = useState('recording');
+  const [seconds, setSeconds] = useState(0);
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [micError, setMicError] = useState(null);
+
+  const mrRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const timerRef = useRef(null);
+  const blobRef = useRef(null);
+  const mimeRef = useRef('');
+
+  useEffect(() => {
+    const mime = getSupportedMimeType();
+    mimeRef.current = mime;
+
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        streamRef.current = stream;
+        const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+        mrRef.current = mr;
+
+        mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+        mr.onstop = () => {
+          const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' });
+          blobRef.current = blob;
+          setBlobUrl(URL.createObjectURL(blob));
+          setPhase('preview');
+          stream.getTracks().forEach((t) => t.stop());
+        };
+
+        mr.start(100);
+        timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+      })
+      .catch(() => {
+        setMicError('Microphone access denied.');
+      });
+
+    return () => {
+      clearInterval(timerRef.current);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    clearInterval(timerRef.current);
+    if (mrRef.current?.state === 'recording') mrRef.current.stop();
+  }, []);
+
+  const handleDiscard = useCallback(() => {
+    clearInterval(timerRef.current);
+    if (mrRef.current?.state === 'recording') mrRef.current.stop();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    onCancel();
+  }, [blobUrl, onCancel]);
+
+  const handleSend = useCallback(async () => {
+    if (!blobRef.current) return;
+    setUploading(true);
+    try {
+      const ext = mimeToExt(mimeRef.current);
+      const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, {
+        type: blobRef.current.type,
+      });
+      const { path } = await base44.storage.uploadAttachment(file);
+      const publicUrl = base44.storage.getPublicUrl(path);
+      await onSend({ message_type: 'audio', media_url: publicUrl || '', media_name: file.name, message_text: '' });
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    } finally {
+      setUploading(false);
+    }
+  }, [blobUrl, onSend]);
+
+  if (micError) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-destructive py-1">
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>{micError}</span>
+        <button onClick={onCancel} className="ml-auto text-muted-foreground hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 py-1">
+      {/* Discard */}
+      <button
+        onClick={handleDiscard}
+        className="h-9 w-9 flex items-center justify-center rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex-shrink-0"
+        title="Discard"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+
+      {phase === 'recording' ? (
+        <>
+          {/* Red dot */}
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+          <WaveformBars />
+          <span className="text-sm font-mono text-red-500 tabular-nums flex-shrink-0 min-w-[36px]">
+            {formatDuration(seconds)}
+          </span>
+          {/* Stop */}
+          <button
+            onClick={stopRecording}
+            className="ml-auto h-10 w-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex-shrink-0"
+            title="Stop recording"
+          >
+            <Square className="h-4 w-4 fill-current" />
+          </button>
+        </>
+      ) : (
+        <>
+          {/* Preview player */}
+          <audio controls src={blobUrl} className="flex-1 h-9 min-w-0" />
+          <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+            {formatDuration(seconds)}
+          </span>
+          {/* Send */}
+          <button
+            onClick={handleSend}
+            disabled={uploading}
+            className="h-10 w-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors flex-shrink-0"
+            title="Send voice note"
+          >
+            {uploading
+              ? <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Send className="h-4 w-4" />
+            }
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 const MODES = [
   { id: "text", label: "Text", icon: FileText },
+  { id: "voice", label: "Voice", icon: Mic },
   { id: "image", label: "Image", icon: Image },
   { id: "file", label: "File", icon: Paperclip },
-  { id: "audio", label: "Audio", icon: Mic },
   { id: "template", label: "Template", icon: Plus },
 ];
 
@@ -292,7 +489,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
       try {
         await onSend({ message_type: "text", message_text: msg });
       } catch (_) {} // error displayed via `error` prop from parent
-    } else if (mode === "image" || mode === "file" || mode === "audio") {
+    } else if (mode === "image" || mode === "file") {
       await uploadAndSend();
     } else if (mode === "template") {
       if (!templateName.trim()) return;
@@ -326,6 +523,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
     // so the user can send the next message while the previous is in-flight
     if (mode !== "text" && isSending) return false;
     if (mode === "text") return text.trim().length > 0;
+    if (mode === "voice") return false; // VoiceRecorder handles its own send
     if (mode === "template") {
       if (!templateName.trim()) return false;
       const needsMedia = ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType);
@@ -378,7 +576,15 @@ export default function MessageComposer({ conversation, onSend, isSending, error
           </div>
         )}
 
-        {(mode === "image" || mode === "file" || mode === "audio") && (
+        {mode === "voice" && (
+          <VoiceRecorder
+            key={mode}
+            onSend={async (payload) => { await onSend(payload); setMode("text"); }}
+            onCancel={() => setMode("text")}
+          />
+        )}
+
+        {(mode === "image" || mode === "file") && (
           <div className="space-y-2">
             <MediaDropzone
               mode={mode}
@@ -387,14 +593,12 @@ export default function MessageComposer({ conversation, onSend, isSending, error
               onClear={handleClear}
               previewUrl={previewUrl}
             />
-            {mode !== "audio" && (
-              <Input
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder={mode === "image" ? "Caption (optional)" : "Description (optional)"}
-                className="text-sm"
-              />
-            )}
+            <Input
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              placeholder={mode === "image" ? "Caption (optional)" : "Description (optional)"}
+              className="text-sm"
+            />
             <Button onClick={handleSend} disabled={!canSend()} className="w-full gap-2">
               {uploading ? (
                 <>

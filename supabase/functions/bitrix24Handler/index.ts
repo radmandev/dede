@@ -98,7 +98,7 @@ serve(async (req: Request) => {
         channelCfg = channelRows.find((c: any) => bxAccount ? c.bitrix24_account_id === bxAccount.id : true) || channelRows[0] || null
       }
 
-      const b24Endpoint = serverEndpoint || bxAccount?.domain || ''
+      const b24Endpoint = clientEndpoint || bxAccount?.domain || ''
       const b24Token = accessToken || bxAccount?.access_token || ''
 
       let spAccount = null
@@ -115,11 +115,15 @@ serve(async (req: Request) => {
         const bbCodeImages = imgMatches.map((m) => ({ link: m[1].trim(), name: 'image.jpg', type: 'IMAGE' }))
         const messageText = rawText.replace(/\[IMG\][^\[]*\[\/IMG\]/gi, '').replace(/\[b\][^\[]*\[\/b\]/gi, '').replace(/\[br\]/gi, '\n').trim()
         const fileIdList = Array.isArray(msg.message?.params?.FILE_ID) ? msg.message.params.FILE_ID : (msg.message?.params?.FILE_ID ? [msg.message.params.FILE_ID] : [])
+        const diskFolderFileIds: any[] = msg.message?.params?.DISK_FOLDER_FILE ? (Array.isArray(msg.message.params.DISK_FOLDER_FILE) ? msg.message.params.DISK_FOLDER_FILE : [msg.message.params.DISK_FOLDER_FILE]) : []
+        const allFileIds = [...fileIdList, ...diskFolderFileIds]
         const filesFromParams = msg.message?.params?.FILES ? Object.values(msg.message?.params?.FILES) : []
         const filesFromAttach = Array.isArray(msg.message?.attach) ? msg.message.attach : []
+        // Bitrix24 sends files here when uploaded directly in the open channel chat
+        const filesFromMessageFiles: any[] = msg.message?.files ? Object.values(msg.message.files as any) : []
 
-        const hasContent = messageText || fileIdList.length > 0 || filesFromParams.length > 0 || filesFromAttach.length > 0 || bbCodeImages.length > 0
-        console.log(`[b24handler] msg chatId=${chatId} text="${messageText?.substring(0, 60)}" hasContent=${!!hasContent} fileIds=${fileIdList.length}`)
+        const hasContent = messageText || allFileIds.length > 0 || filesFromParams.length > 0 || filesFromAttach.length > 0 || bbCodeImages.length > 0 || filesFromMessageFiles.length > 0
+        console.log(`[b24handler] msg chatId=${chatId} text="${messageText?.substring(0, 60)}" hasContent=${!!hasContent} fileIds=${allFileIds.length} msgFiles=${filesFromMessageFiles.length}`)
         if (!chatId || !hasContent) continue
 
         const bitrixMsgId = String(msg.im?.message_id || msg.message?.id || '')
@@ -152,12 +156,19 @@ serve(async (req: Request) => {
         const conv = convs[0]
 
         let resolvedFiles: any[] = []
-        if (fileIdList.length > 0 && b24Endpoint && b24Token) {
-          resolvedFiles = await resolveFileAttachments(b24Endpoint, b24Token, fileIdList)
+        if (allFileIds.length > 0 && b24Endpoint && b24Token) {
+          resolvedFiles = await resolveFileAttachments(b24Endpoint, b24Token, allFileIds)
         }
         for (const f of filesFromParams as any[]) {
           const link = f.link || f.LINK || f.urlDownload || f.url || ''
           if (link) resolvedFiles.push({ link, name: f.name || f.NAME || 'file', type: (f.type || f.TYPE || '').toString().toUpperCase() || 'DOCUMENT' })
+        }
+        for (const f of filesFromMessageFiles as any[]) {
+          const link = f.downloadLink || f.link || ''
+          if (!link) continue
+          const mime = (f.mime || '').toLowerCase()
+          const ftype = mime.startsWith('image') ? 'IMAGE' : mime.startsWith('audio') || mime.startsWith('video') ? 'AUDIO' : 'DOCUMENT'
+          resolvedFiles.push({ link, name: f.name || 'file', type: ftype })
         }
         resolvedFiles.push(...bbCodeImages)
         const attachments = resolvedFiles
@@ -165,6 +176,7 @@ serve(async (req: Request) => {
         const firstAtt = attachments[0]
         const savedText = messageText || (firstAtt ? firstAtt.name : '')
         const msgType = firstAtt ? (firstAtt.type === 'IMAGE' ? 'image' : firstAtt.type === 'AUDIO' ? 'audio' : 'file') : 'text'
+        console.log(`[b24handler] inserting msgType=${msgType} attachments=${attachments.length} link=${firstAtt?.link?.substring(0, 80)} dedupId=${dedupId}`)
         const { error: insertErr } = await supabase.from('messages').insert([{
           conversation_id: conv.id,
           sendpulse_message_id: dedupId || null,
@@ -177,7 +189,8 @@ serve(async (req: Request) => {
           channel: conv.channel || 'whatsapp',
           sent_at: new Date().toISOString(),
         }])
-        if (insertErr) throw insertErr
+        if (insertErr) { console.error(`[b24handler] insert error: ${JSON.stringify(insertErr)}`); throw insertErr }
+        console.log(`[b24handler] message inserted OK conv=${conv.id}`)
         const { error: updateConvErr } = await supabase.from('conversations').update({ last_message_text: messageText || (firstAtt ? `[${msgType}]` : ''), last_message_at: new Date().toISOString() }).eq('id', conv.id)
         if (updateConvErr) throw updateConvErr
 

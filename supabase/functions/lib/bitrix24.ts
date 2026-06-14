@@ -74,3 +74,85 @@ export function makeJsonResponse(body: any, status = 200) {
     headers: { 'content-type': 'application/json' },
   })
 }
+
+/**
+ * Forward a message to a Bitrix24 open channel via imconnector.send.messages.
+ * Updates conversation.bitrix24_chat_id if the API returns a new chat ID.
+ */
+export async function sendToBitrix24(
+  supabase: any,
+  account: any,
+  channelCfg: any,
+  conversation: any,
+  messageText: string,
+  messageId: string,
+  msgType: string,
+  mediaUrl: string,
+  mediaFilename: string,
+  contactPhone: string
+) {
+  const isOAuthServer = (ep: string) => ep.includes('oauth.bitrix.info') || ep.includes('oauth.bitrix24.tech')
+  let accountDomain = account.domain || ''
+  if (isOAuthServer(accountDomain) && account.name) {
+    const host = account.name.includes('.') ? account.name : null
+    if (host) {
+      accountDomain = `https://${host}/rest/`
+      await supabase.from('bitrix24_accounts').update({ domain: accountDomain }).eq('id', account.id)
+      console.log(`[b24] repaired domain to ${accountDomain}`)
+    }
+  }
+  if (!accountDomain || isOAuthServer(accountDomain) || !channelCfg?.bitrix24_line_id) return
+
+  const token = await ensureBitrixToken(supabase, account)
+  if (!token) { console.error('[b24] no token — skipping'); return }
+
+  const CONNECTOR_ID = channelCfg.bitrix24_connector_id || 'whatsapp_sendpulse'
+  const LINE_ID = Number(channelCfg.bitrix24_line_id)
+  const endpoint = accountDomain.endsWith('/') ? accountDomain : accountDomain + '/'
+  const unixNow = Math.floor(Date.now() / 1000)
+
+  const messageObj: any = { id: messageId || String(Date.now()), date: unixNow, text: messageText || '', type: 'message' }
+
+  if (mediaUrl) {
+    const isImage = msgType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaFilename || '')
+    const isAudio = msgType === 'audio' || /\.(mp3|ogg|wav|aac|m4a)$/i.test(mediaFilename || '')
+    const label = isImage ? 'image' : isAudio ? 'audio' : 'file'
+    messageObj.text = messageText ? `${messageText}\n[URL=${mediaUrl}]${label}[/URL]` : `[URL=${mediaUrl}]${label}[/URL]`
+  }
+
+  const phone = contactPhone || conversation.contact_phone || ''
+  const msgItem: any = {
+    user: {
+      id: String(conversation.sendpulse_contact_id),
+      name: conversation.contact_name || 'Customer',
+      phone,
+      avatar: '',
+      online: true,
+    },
+    message: messageObj,
+    chat: { id: String(conversation.sendpulse_contact_id) },
+  }
+
+  const payload = { CONNECTOR: CONNECTOR_ID, LINE: LINE_ID, MESSAGES: [msgItem] }
+  const res = await fetch(`${endpoint}imconnector.send.messages?auth=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const result = await res.json().catch(() => null)
+  if (result?.error) {
+    console.error('[b24] imconnector.send.messages error:', JSON.stringify(result))
+  } else {
+    const returnedChatId =
+      result?.result?.DATA?.RESULT_SESSION?.CHAT_ID ||
+      result?.result?.DATA?.RESULT_MESSAGE?.[0]?.chat_id ||
+      result?.result?.DATA?.RESULT_MESSAGE?.[0]?.CHAT_ID ||
+      result?.result?.DATA?.RESULT?.[0]?.session?.CHAT_ID ||
+      result?.result?.[0]?.chat_id ||
+      result?.result?.chat_id
+    console.log(`[b24] sent ok returnedChatId=${returnedChatId}`)
+    if (returnedChatId && String(conversation.bitrix24_chat_id) !== String(returnedChatId)) {
+      await supabase.from('conversations').update({ bitrix24_chat_id: Number(returnedChatId) }).eq('id', conversation.id)
+    }
+  }
+}

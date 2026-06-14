@@ -3,6 +3,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { performSendPulseDelivery, enqueueDelivery, sendTemplateMessage } from '../lib/sendpulse.ts'
 import { uploadRemoteAttachment } from '../lib/storage.ts'
+import { sendToBitrix24 } from '../lib/bitrix24.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -18,10 +19,20 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => null)
     const {
       conversation_id, text: rawText, message_text, attachments, sendpulse_account_id,
-      message_type, template_name, template_language, template_params, template_header_type, template_media_url,
+      message_type, media_url, media_name,
+      template_name, template_language, template_params, template_header_type, template_media_url,
     } = body || {}
     const text = rawText || message_text || ''
     const isTemplate = message_type === 'template'
+
+    // Build effective attachments: frontend sends media_url/media_name directly (no attachments array)
+    let effectiveAttachments: any[] = attachments || []
+    if (media_url && effectiveAttachments.length === 0) {
+      const attType = message_type === 'image' ? 'image'
+                    : message_type === 'audio' ? 'audio'
+                    : 'document'
+      effectiveAttachments = [{ link: media_url, name: media_name || 'file', type: attType }]
+    }
 
     // Persist outbound message
     let convChannel: string | null = null
@@ -33,12 +44,14 @@ serve(async (req: Request) => {
     }
 
     const savedText = isTemplate ? (template_name || '') : (text || null)
-    const savedType = isTemplate ? 'template' : (attachments?.length ? 'file' : 'text')
+    const savedType = isTemplate ? 'template' : (message_type || (effectiveAttachments.length ? 'file' : 'text'))
 
     const { data: inserted, error } = await supabase.from('messages').insert([{
       conversation_id: conversation_id || null,
       message_text: savedText,
       message_type: savedType,
+      media_url: media_url || null,
+      media_name: media_name || null,
       direction: 'outbound',
       channel: convChannel,
     }]).select().limit(1).single()
@@ -79,7 +92,7 @@ serve(async (req: Request) => {
           }
         } else {
           const resolvedAttachments = []
-          for (const att of (attachments || [])) {
+          for (const att of effectiveAttachments) {
             if (!att?.link) continue
             try {
               if (!att.link.includes('/storage/v1/object/')) {
@@ -94,12 +107,34 @@ serve(async (req: Request) => {
             await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments, botRowId)
           } catch (e) {
             console.error('delivery failed, enqueuing', e)
-            await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments })
+            await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments: effectiveAttachments })
           }
         }
       }
     } catch (e) {
       console.error('[sendMessage] delivery setup error:', e)
+    }
+
+    // Forward to Bitrix24 open channel if conversation is linked
+    if (convRow?.sendpulse_bot_id) {
+      try {
+        const { data: cfgs } = await supabase.from('bitrix24_open_channels')
+          .select('*').eq('sendpulse_bot_id', convRow.sendpulse_bot_id).limit(1)
+        const channelCfg = cfgs?.[0]
+        if (channelCfg?.bitrix24_account_id && channelCfg?.bitrix24_line_id) {
+          const { data: accs } = await supabase.from('bitrix24_accounts')
+            .select('*').eq('id', channelCfg.bitrix24_account_id).limit(1)
+          const bxAccount = accs?.[0]
+          if (bxAccount) {
+            const fwdText = isTemplate ? (template_name || '') : text
+            const fwdType = isTemplate ? 'text' : (message_type || '')
+            await sendToBitrix24(supabase, bxAccount, channelCfg, convRow, fwdText, String(inserted.id), fwdType, media_url || '', media_name || '', convRow.contact_phone || '')
+            console.log(`[sendMessage] forwarded to Bitrix24 conv=${convRow.id}`)
+          }
+        }
+      } catch (b24err) {
+        console.error('[sendMessage] Bitrix24 forward error:', b24err)
+      }
     }
 
     return jsonResponse({ ok: true, message: inserted })
