@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { base44, supabase } from "@/api/base44Client";
-import { Mp3Encoder } from "lamejs";
+import lamejs from "lamejs";
 import { Send, CheckCircle2, AlertCircle, Loader2, RefreshCw, X, Mic, FileText, Trash2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,7 +106,7 @@ async function convertWebmToMp3(webmBlob) {
   await audioCtx.close();
   const sampleRate = audioBuffer.sampleRate;
   const pcm = audioBuffer.getChannelData(0);
-  const encoder = new Mp3Encoder(1, sampleRate, 128);
+  const encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
   const blockSize = 1152;
   const chunks = [];
   for (let i = 0; i < pcm.length; i += blockSize) {
