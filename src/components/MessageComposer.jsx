@@ -138,7 +138,7 @@ function VoiceRecorder({ onSend, onCancel }) {
       const file = new File([blobRef.current], `voice-note-${Date.now()}.${ext}`, { type: uploadMime });
       const { path } = await base44.storage.uploadAttachment(file, { contentType: uploadMime });
       const publicUrl = base44.storage.getPublicUrl(path);
-      await onSend({ message_type: 'voice', media_url: publicUrl || '', media_name: file.name, message_text: '' });
+      await onSend({ message_type: 'audio', media_url: publicUrl || '', media_name: file.name, message_text: '' });
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     } finally {
       setUploading(false);
