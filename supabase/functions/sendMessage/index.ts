@@ -95,11 +95,25 @@ serve(async (req: Request) => {
           for (const att of effectiveAttachments) {
             if (!att?.link) continue
             try {
-              if (!att.link.includes('/storage/v1/object/')) {
+              if (att.link.includes('/storage/v1/object/public/')) {
+                // Supabase public-URL format — create a signed URL so external services
+                // (SendPulse, WhatsApp) can always fetch it regardless of bucket policy.
+                const bucketMatch = att.link.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)/)
+                if (bucketMatch) {
+                  const [, bucketName, storagePath] = bucketMatch
+                  const { data: signedData, error: signErr } = await supabase.storage
+                    .from(bucketName).createSignedUrl(storagePath, 604800) // 7 days
+                  const signedUrl = signedData?.signedUrl
+                  console.log(`[sendMessage] signed url bucket=${bucketName} path=${storagePath} ok=${!!signedUrl} err=${signErr?.message}`)
+                  resolvedAttachments.push({ link: signedUrl || att.link, name: att.name, type: att.type || 'document' })
+                } else {
+                  resolvedAttachments.push(att)
+                }
+              } else if (att.link.includes('/storage/v1/object/')) {
+                resolvedAttachments.push(att)
+              } else {
                 const uploaded = await uploadRemoteAttachment(supabase, att.link)
                 resolvedAttachments.push({ link: uploaded.url, name: uploaded.filename, type: att.type || 'document' })
-              } else {
-                resolvedAttachments.push(att)
               }
             } catch (e) { console.error('attachment upload failed', e) }
           }
