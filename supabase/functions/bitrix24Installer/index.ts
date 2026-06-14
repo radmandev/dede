@@ -238,9 +238,15 @@ serve(async (req: Request) => {
         await callBitrix(serverEndpoint, accessToken, 'placement.bind', {
           PLACEMENT: 'IM_TEXTAREA',
           HANDLER: imTemplateUrl,
-          TITLE: 'noqtaChat Templates',
-          DESCRIPTION: 'Send WhatsApp template messages',
-          OPTIONS: { context: 'LINES' },
+          TITLE: 'noqtaChat: Send WA Template',
+          DESCRIPTION: 'Send WhatsApp template messages via noqtaChat',
+          OPTIONS: {
+            iconName: 'fa-paper-plane',
+            context: 'LINES',
+            color: 'GREEN',
+            width: '420',
+            height: '560',
+          },
         })
       }
     }

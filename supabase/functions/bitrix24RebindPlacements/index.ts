@@ -93,17 +93,29 @@ serve(async (req: Request) => {
 
       // IM_TEXTAREA — template sender button in the open channel chat compose bar
       const imTemplateUrl = `${appBaseUrl}/im-template`
-      // Remove old (invalid) placement registrations
+      // Remove old (invalid) placement registrations for all previous handler URLs
       await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'IM_SMILES_PANEL', HANDLER: imTemplateUrl })
       await callBitrix(endpoint, token, 'placement.unbind', { PLACEMENT: 'IM_TEXTAREA', HANDLER: imTemplateUrl })
       const imBind = await callBitrix(endpoint, token, 'placement.bind', {
         PLACEMENT: 'IM_TEXTAREA',
         HANDLER: imTemplateUrl,
-        TITLE: 'noqtaChat Templates',
-        DESCRIPTION: 'Send WhatsApp template messages',
-        OPTIONS: { context: 'LINES' },
+        TITLE: 'noqtaChat: Send WA Template',
+        DESCRIPTION: 'Send WhatsApp template messages via noqtaChat',
+        OPTIONS: {
+          iconName: 'fa-paper-plane',
+          context: 'LINES',
+          color: 'GREEN',
+          width: '420',
+          height: '560',
+        },
       })
       console.log(`[rebind] IM_TEXTAREA for ${account.name}:`, JSON.stringify(imBind))
+
+      // Fetch current registered placements for diagnostics
+      const placementGetRes = await callBitrix(endpoint, token, 'placement.get', { PLACEMENT: 'IM_TEXTAREA' })
+      const registeredImPlacements = Array.isArray(placementGetRes?.result)
+        ? placementGetRes.result.map((p: any) => ({ handler: p.handler, title: p.title, options: p.options }))
+        : placementGetRes?.result
 
       results.push({
         account: account.name,
@@ -114,7 +126,8 @@ serve(async (req: Request) => {
         left_menu: lmBind?.result === true ? '✓' : (lmBind?.error_description || lmBind?.error || '?'),
         contact_center: ccBind?.result === true ? '✓' : (ccBind?.error_description || ccBind?.error || '?'),
         event_handler: eventBind?.result === true ? '✓' : (eventBind?.error_description || eventBind?.error || '?'),
-        im_smiles_panel: imBind?.result === true ? '✓' : (imBind?.error_description || imBind?.error || '?'),
+        im_textarea: imBind?.result === true ? '✓' : (imBind?.error_description || imBind?.error || JSON.stringify(imBind)),
+        im_textarea_registered: registeredImPlacements,
       })
     }
 

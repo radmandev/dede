@@ -1,12 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { base44, supabase } from "@/api/base44Client";
-import { Send, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Send, CheckCircle2, AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import TemplateSelect from "../components/TemplateSelect";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { X, Upload } from "lucide-react";
-import { useRef as useFileRef } from "react";
 
 // ── BX24 bridge ─────────────────────────────────────────────────────────────
 
@@ -36,39 +32,40 @@ function parseBody(text) {
   return parts;
 }
 
-// ── Compact media dropzone ───────────────────────────────────────────────────
+// ── File picker — uses <label> so it works inside sandboxed iframes ──────────
 
-function MediaPicker({ headerType, file, previewUrl, onChange, onClear }) {
-  const ref = useRef(null);
+function MediaPicker({ inputId, headerType, file, previewUrl, onChange, onClear }) {
   const isImage = headerType === "IMAGE";
+  const label = headerType.charAt(0) + headerType.slice(1).toLowerCase();
   return (
     <div>
       <input
-        ref={ref}
+        id={inputId}
         type="file"
-        className="hidden"
+        className="sr-only"
         accept={isImage ? "image/*" : "*/*"}
         onChange={(e) => onChange(e.target.files?.[0] || null)}
       />
       {file ? (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-          {isImage && previewUrl ? (
+          {isImage && previewUrl && (
             <img src={previewUrl} className="h-10 w-10 object-cover rounded" alt="preview" />
-          ) : null}
+          )}
           <span className="text-xs truncate flex-1">{file.name}</span>
-          <button onClick={onClear} className="text-muted-foreground hover:text-destructive">
+          <button type="button" onClick={onClear} className="text-muted-foreground hover:text-destructive">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => ref.current?.click()}
-          className="w-full flex items-center gap-2 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-accent/20 px-3 py-2.5 text-xs text-muted-foreground transition-colors"
+        <label
+          htmlFor={inputId}
+          className="w-full flex items-center gap-2 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-accent/20 px-3 py-2.5 text-xs text-muted-foreground transition-colors cursor-pointer"
         >
-          <Upload className="h-3.5 w-3.5 flex-shrink-0" />
-          Select {headerType.charAt(0) + headerType.slice(1).toLowerCase()} *
-        </button>
+          <svg className="h-3.5 w-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          Select {label} *
+        </label>
       )}
     </div>
   );
@@ -80,6 +77,10 @@ export default function ImTemplatePanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [conv, setConv] = useState(null);
+
+  // Templates
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
 
   // Template state
   const [templateName, setTemplateName] = useState("");
@@ -109,7 +110,6 @@ export default function ImTemplatePanel() {
       await loadBx24();
 
       if (!window.BX24) {
-        // Dev fallback: try to use a hardcoded conv for testing
         if (!dead) setLoading(false);
         return;
       }
@@ -118,11 +118,9 @@ export default function ImTemplatePanel() {
         if (dead) return;
         try {
           const info = window.BX24.placement.info();
-          // IM_TEXTAREA sends dialogId (camelCase); legacy fallbacks for other placements
           const dialogId = info?.options?.dialogId || info?.options?.DIALOG_ID || info?.options?.dialog_id || "";
-          console.log("[ImTemplate] DIALOG_ID:", dialogId, "placement:", info?.placement);
+          console.log("[ImTemplate] dialogId:", dialogId, "placement:", info?.placement);
 
-          // Parse numeric chat ID from formats: "chat17", "17", "imol/5/17"
           let chatId = null;
           if (dialogId) {
             const numMatch = dialogId.match(/(\d+)$/);
@@ -136,16 +134,12 @@ export default function ImTemplatePanel() {
               .eq("bitrix24_chat_id", chatId)
               .limit(1)
               .maybeSingle();
-            if (rows) {
-              if (!dead) setConv(rows);
-            } else {
-              console.warn("[ImTemplate] no conversation for chatId:", chatId);
-            }
+            if (rows && !dead) setConv(rows);
+            else console.warn("[ImTemplate] no conversation for chatId:", chatId);
           }
 
           if (!dead) {
-            // Tell Bitrix24 to adjust the iframe to content size
-            try { window.BX24.fitWindow(); } catch {}
+            try { window.BX24.resizeWindow(420, 560); } catch {}
             setLoading(false);
           }
         } catch (e) {
@@ -157,7 +151,39 @@ export default function ImTemplatePanel() {
     return () => { dead = true; };
   }, []);
 
+  // ── Fetch templates when conv is resolved ─────────────────────────────────
+  const fetchTemplates = async (botId) => {
+    if (!botId) return;
+    setTemplatesLoading(true);
+    try {
+      const res = await base44.functions.invoke("getSendPulseTemplates", { botId });
+      const list = res.data?.templates || [];
+      setTemplates(list);
+      // Auto-select first if none selected
+      if (list.length > 0 && !templateName) {
+        applyTemplate(list[0]);
+      }
+    } catch (e) {
+      console.warn("[ImTemplate] failed to load templates:", e.message);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (conv?.sendpulse_bot_id) fetchTemplates(conv.sendpulse_bot_id);
+  }, [conv?.sendpulse_bot_id]); // eslint-disable-line
+
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  const applyTemplate = (t) => {
+    setTemplateName(t.name);
+    setTemplateLang(t.language || "en");
+    setTemplateBodyText(t.bodyText || "");
+    setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : []);
+    setTemplateHeaderType(t.headerType || "NONE");
+    clearMedia();
+  };
 
   const setParam = (idx, val) => {
     setTemplateParams((prev) => {
@@ -183,17 +209,9 @@ export default function ImTemplatePanel() {
     }
   };
 
-  const needsMedia = ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType);
-
-  const canSend =
-    !sending &&
-    !!templateName &&
-    (!needsMedia || !!mediaFile) &&
-    (!parsedBody.some((p) => p.kind === "var") ||
-      templateParams.every((p) => p.trim()));
-
   const parsedBody = templateBodyText ? parseBody(templateBodyText) : [];
   const hasInlineVars = parsedBody.some((p) => p.kind === "var");
+  const needsMedia = ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderType);
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
@@ -220,7 +238,6 @@ export default function ImTemplatePanel() {
       });
 
       setSent(true);
-      // Auto-close the panel in Bitrix24 after a short delay
       setTimeout(() => {
         try { window.BX24?.closeApplication(); } catch {}
       }, 1500);
@@ -235,7 +252,7 @@ export default function ImTemplatePanel() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -243,7 +260,7 @@ export default function ImTemplatePanel() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
+      <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
         <AlertCircle className="h-8 w-8 text-destructive mb-2 opacity-60" />
         <p className="text-sm text-muted-foreground">{error}</p>
       </div>
@@ -252,7 +269,7 @@ export default function ImTemplatePanel() {
 
   if (sent) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
+      <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
         <CheckCircle2 className="h-10 w-10 text-emerald-500 mb-3" />
         <p className="text-sm font-medium">Template sent!</p>
         <p className="text-xs text-muted-foreground mt-1">
@@ -263,7 +280,7 @@ export default function ImTemplatePanel() {
   }
 
   return (
-    <div className="min-h-screen bg-background font-inter p-4">
+    <div className="h-screen overflow-y-auto bg-background font-inter p-4">
       <div className="max-w-sm mx-auto space-y-4">
 
         {/* Header */}
@@ -280,28 +297,57 @@ export default function ImTemplatePanel() {
           )}
         </div>
 
-        {/* Template selector */}
-        <TemplateSelect
-          botId={conv?.sendpulse_bot_id}
-          selectedName={templateName}
-          onSelect={(t) => {
-            setTemplateName(t.name);
-            setTemplateLang(t.language || "en");
-            setTemplateBodyText(t.bodyText || "");
-            setTemplateParams(t.paramCount > 0 ? Array(t.paramCount).fill("") : []);
-            setTemplateHeaderType(t.headerType || "NONE");
-            clearMedia();
-          }}
-        />
+        {/* Template selector — native <select> works reliably inside iframes */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium">Template</label>
+            <button
+              type="button"
+              onClick={() => fetchTemplates(conv?.sendpulse_bot_id)}
+              disabled={templatesLoading || !conv?.sendpulse_bot_id}
+              className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3 w-3 ${templatesLoading ? "animate-spin" : ""}`} /> Sync
+            </button>
+          </div>
+          {templatesLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading templates…
+            </div>
+          ) : (
+            <select
+              value={templateName}
+              onChange={(e) => {
+                const t = templates.find((x) => x.name === e.target.value);
+                if (t) applyTemplate(t);
+              }}
+              disabled={templates.length === 0}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
+            >
+              {templates.length === 0 && (
+                <option value="">No templates found</option>
+              )}
+              {templates.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.name} [{t.headerType}] {t.language?.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          )}
+          {!conv?.sendpulse_bot_id && !templatesLoading && (
+            <p className="text-xs text-muted-foreground">No bot linked to this conversation.</p>
+          )}
+        </div>
 
-        {/* Media upload for header */}
+        {/* Media upload — <label> wrapping works in sandboxed iframes */}
         {needsMedia && (
           <div className="space-y-1">
-            <Label className="text-xs">
+            <label className="text-xs font-medium">
               Header {templateHeaderType.charAt(0) + templateHeaderType.slice(1).toLowerCase()}
               <span className="text-destructive ml-1">*</span>
-            </Label>
+            </label>
             <MediaPicker
+              inputId="im-template-media"
               headerType={templateHeaderType}
               file={mediaFile}
               previewUrl={mediaPreview}
@@ -315,9 +361,7 @@ export default function ImTemplatePanel() {
         {templateName && templateBodyText && (
           <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
             <div className="px-3 pt-2 pb-1 border-b border-border/40">
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Preview
-              </span>
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Preview</span>
             </div>
             <div className="p-3 text-sm leading-relaxed" dir="auto">
               {parsedBody.map((part, i) =>
@@ -338,10 +382,10 @@ export default function ImTemplatePanel() {
           </div>
         )}
 
-        {/* Fallback: separate param inputs when bodyText has no inline vars */}
-        {templateName && !hasInlineVars && (
+        {/* Fallback param inputs when body has no inline {{N}} vars */}
+        {templateName && !hasInlineVars && templateParams.length > 0 && (
           <div className="space-y-1">
-            <Label className="text-xs">Body Parameters</Label>
+            <label className="text-xs font-medium">Body Parameters</label>
             <div className="space-y-1.5">
               {templateParams.map((p, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -353,6 +397,7 @@ export default function ImTemplatePanel() {
                     className="text-sm flex-1 h-8"
                   />
                   <button
+                    type="button"
                     onClick={() => setTemplateParams((prev) => prev.filter((_, j) => j !== i))}
                     className="text-muted-foreground hover:text-destructive flex-shrink-0"
                   >
@@ -360,12 +405,6 @@ export default function ImTemplatePanel() {
                   </button>
                 </div>
               ))}
-              <button
-                onClick={() => setTemplateParams((prev) => [...prev, ""])}
-                className="text-xs text-primary hover:underline"
-              >
-                + Add parameter
-              </button>
             </div>
           </div>
         )}
