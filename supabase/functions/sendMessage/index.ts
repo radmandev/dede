@@ -61,7 +61,8 @@ serve(async (req: Request) => {
       return jsonResponse({ ok: false, error: String(error) }, 500)
     }
 
-    // Attempt SendPulse delivery
+    // Attempt SendPulse delivery — track every step so diagnostics are returned to the caller
+    const delivery: any = { status: 'pending' }
     try {
       let accountId = sendpulse_account_id
       let contactId = null
@@ -77,55 +78,70 @@ serve(async (req: Request) => {
       if (!contactId && body?.contact_id) contactId = body.contact_id
       channel = channel || 'live_chat'
 
+      delivery.accountId = accountId || null
+      delivery.contactId = contactId || null
+      delivery.channel = channel
+      delivery.botRowId = botRowId || null
+
       console.log(`[sendMessage] accountId=${accountId} contactId=${contactId} botRowId=${botRowId} channel=${channel} isTemplate=${isTemplate}`)
 
-      if (accountId && contactId) {
-        if (isTemplate) {
-          const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
-          const deliveryResult = await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '', botRowId)
-            .catch((e: any) => ({ error: String(e) }))
-          if ((deliveryResult as any)?.error) {
-            console.error('[sendMessage] template delivery failed:', (deliveryResult as any).error)
-            // Update message status to reflect delivery failure
-            await supabase.from('messages').update({ message_text: `[delivery failed] ${template_name}` }).eq('id', inserted?.id)
-            return jsonResponse({ ok: false, error: (deliveryResult as any).error, message: inserted }, 200)
-          }
-        } else {
-          const resolvedAttachments = []
-          for (const att of effectiveAttachments) {
-            if (!att?.link) continue
-            try {
-              if (att.link.includes('/storage/v1/object/public/')) {
-                // Supabase public-URL format — create a signed URL so external services
-                // (SendPulse, WhatsApp) can always fetch it regardless of bucket policy.
-                const bucketMatch = att.link.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)/)
-                if (bucketMatch) {
-                  const [, bucketName, storagePath] = bucketMatch
-                  const { data: signedData, error: signErr } = await supabase.storage
-                    .from(bucketName).createSignedUrl(storagePath, 604800) // 7 days
-                  const signedUrl = signedData?.signedUrl
-                  console.log(`[sendMessage] signed url bucket=${bucketName} path=${storagePath} ok=${!!signedUrl} err=${signErr?.message}`)
-                  resolvedAttachments.push({ link: signedUrl || att.link, name: att.name, type: att.type || 'document' })
-                } else {
-                  resolvedAttachments.push(att)
-                }
-              } else if (att.link.includes('/storage/v1/object/')) {
-                resolvedAttachments.push(att)
-              } else {
-                const uploaded = await uploadRemoteAttachment(supabase, att.link)
-                resolvedAttachments.push({ link: uploaded.url, name: uploaded.filename, type: att.type || 'document' })
-              }
-            } catch (e) { console.error('attachment upload failed', e) }
-          }
+      if (!accountId || !contactId) {
+        delivery.status = 'skipped'
+        delivery.reason = !accountId ? 'no-account-id' : 'no-contact-id'
+        console.warn(`[sendMessage] delivery skipped: ${delivery.reason}`)
+      } else if (isTemplate) {
+        const bodyParams = Array.isArray(template_params) ? template_params.filter((p: string) => p && p.trim()) : []
+        const deliveryResult = await sendTemplateMessage(supabase, accountId, contactId, template_name, template_language || 'en', bodyParams, template_header_type || '', template_media_url || '', botRowId)
+          .catch((e: any) => ({ error: String(e) }))
+        if ((deliveryResult as any)?.error) {
+          console.error('[sendMessage] template delivery failed:', (deliveryResult as any).error)
+          await supabase.from('messages').update({ message_text: `[delivery failed] ${template_name}` }).eq('id', inserted?.id)
+          return jsonResponse({ ok: false, error: (deliveryResult as any).error, message: inserted, delivery }, 200)
+        }
+        delivery.status = 'ok'
+      } else {
+        const resolvedAttachments: any[] = []
+        for (const att of effectiveAttachments) {
+          if (!att?.link) continue
           try {
-            await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments, botRowId)
-          } catch (e) {
-            console.error('delivery failed, enqueuing', e)
-            await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments: effectiveAttachments })
-          }
+            if (att.link.includes('/storage/v1/object/public/')) {
+              // Create a signed URL so external services can access regardless of bucket policy
+              const bucketMatch = att.link.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)/)
+              if (bucketMatch) {
+                const [, bucketName, storagePath] = bucketMatch
+                const { data: signedData, error: signErr } = await supabase.storage
+                  .from(bucketName).createSignedUrl(storagePath, 604800) // 7 days
+                const signedUrl = signedData?.signedUrl
+                console.log(`[sendMessage] signed url bucket=${bucketName} path=${storagePath} ok=${!!signedUrl} err=${signErr?.message}`)
+                delivery.signedUrl = signedUrl ? signedUrl.substring(0, 120) + '…' : null
+                delivery.signErr = signErr?.message || null
+                resolvedAttachments.push({ link: signedUrl || att.link, name: att.name, type: att.type || 'document' })
+              } else {
+                resolvedAttachments.push(att)
+              }
+            } else if (att.link.includes('/storage/v1/object/')) {
+              resolvedAttachments.push(att)
+            } else {
+              const uploaded = await uploadRemoteAttachment(supabase, att.link)
+              resolvedAttachments.push({ link: uploaded.url, name: uploaded.filename, type: att.type || 'document' })
+            }
+          } catch (e) { console.error('attachment upload failed', e) }
+        }
+        delivery.resolvedCount = resolvedAttachments.length
+        try {
+          const spResults = await performSendPulseDelivery(supabase, accountId, channel, contactId, text, resolvedAttachments, botRowId)
+          delivery.status = 'ok'
+          delivery.spResults = spResults
+        } catch (e: any) {
+          delivery.status = 'queued'
+          delivery.error = String(e)
+          console.error('delivery failed, enqueuing', e)
+          await enqueueDelivery(supabase, { sendpulse_account_id: accountId, conversation_id, message_id: inserted?.id, contact_id: contactId, channel, text, attachments: effectiveAttachments })
         }
       }
-    } catch (e) {
+    } catch (e: any) {
+      delivery.status = 'error'
+      delivery.error = String(e)
       console.error('[sendMessage] delivery setup error:', e)
     }
 
@@ -151,7 +167,7 @@ serve(async (req: Request) => {
       }
     }
 
-    return jsonResponse({ ok: true, message: inserted })
+    return jsonResponse({ ok: true, message: inserted, delivery })
   } catch (err) {
     console.error('sendMessage error', err)
     return jsonResponse({ ok: false, error: String(err) }, 500)

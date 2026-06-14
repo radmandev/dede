@@ -54,7 +54,11 @@ export default function MessageThread({ conversation }) {
 
   const sendMessage = useMutation({
     mutationFn: (payload) => base44.functions.invoke('sendMessage', { conversation_id: conversation.id, ...payload }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Log delivery diagnostics to browser console for debugging
+      if (result?.data?.delivery) {
+        console.log('[noqta] sendMessage delivery:', result.data.delivery);
+      }
       queryClient.invalidateQueries({ queryKey: ["messages", conversation?.id] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
