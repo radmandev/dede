@@ -148,17 +148,18 @@ async function sendToBitrix24(
   messageText: string, messageId: string, msgType: string,
   mediaUrl: string, mediaFilename: string, contactPhone: string
 ) {
-  // Repair domain if bitrix24Handler corrupted it with the generic OAuth endpoint
+  // Repair domain if bitrix24Handler stored a generic OAuth server URL instead of the portal URL
+  const isOAuthServer = (ep: string) => ep.includes('oauth.bitrix.info') || ep.includes('oauth.bitrix24.tech')
   let accountDomain = account.domain || ''
-  if (accountDomain.includes('oauth.bitrix.info') && account.name) {
+  if (isOAuthServer(accountDomain) && account.name) {
     const host = account.name.includes('.') ? account.name : null
     if (host) {
       accountDomain = `https://${host}/rest/`
       await supabase.from('bitrix24_accounts').update({ domain: accountDomain }).eq('id', account.id)
-      console.log(`[b24] repaired domain from oauth.bitrix.info to ${accountDomain}`)
+      console.log(`[b24] repaired corrupted domain to ${accountDomain}`)
     }
   }
-  if (!accountDomain || accountDomain.includes('oauth.bitrix.info') || !channelCfg.bitrix24_line_id) return
+  if (!accountDomain || isOAuthServer(accountDomain) || !channelCfg.bitrix24_line_id) return
 
   let token = account.access_token
   const expires = account.token_expires_at ? new Date(account.token_expires_at) : null
@@ -230,12 +231,16 @@ async function sendToBitrix24(
   }
 
   const returnedChatId =
-    result?.result?.DATA?.RESULT?.[0]?.session?.CHAT_ID ||
-    result?.result?.DATA?.RESULT_MESSAGE?.[0]?.chat_id ||
+    result?.result?.DATA?.RESULT_SESSION?.CHAT_ID ||       // primary: session-level chat ID
+    result?.result?.DATA?.RESULT_MESSAGE?.[0]?.chat_id ||  // per-message chat_id
+    result?.result?.DATA?.RESULT_MESSAGE?.[0]?.CHAT_ID ||  // uppercase variant
+    result?.result?.DATA?.RESULT?.[0]?.session?.CHAT_ID || // nested session
     result?.result?.[0]?.chat_id ||
     result?.result?.chat_id
+  console.log(`[b24] imconnector result keys: ${JSON.stringify(Object.keys(result?.result?.DATA || {}))} returnedChatId=${returnedChatId}`)
   if (returnedChatId && String(conversation.bitrix24_chat_id) !== String(returnedChatId)) {
     await supabase.from('conversations').update({ bitrix24_chat_id: Number(returnedChatId) }).eq('id', conversation.id)
+    console.log(`[b24] updated bitrix24_chat_id=${returnedChatId} for conv=${conversation.id}`)
   }
 }
 
@@ -509,22 +514,28 @@ serve(async (req: Request) => {
     // ── Phase 3: message insert + unread + Bitrix24 forward in parallel ─────
     const tasks: Promise<any>[] = []
 
+    console.log(`[webhook] phase3 effectiveText=${JSON.stringify(effectiveText)} finalMediaUrl=${!!finalMediaUrl} convId=${conversation?.id}`)
     if (effectiveText || finalMediaUrl) {
+      const msgPayload = {
+        conversation_id: conversation?.id || null,
+        sendpulse_message_id: messageId || null,
+        sender_name: contactName,
+        message_text: messageText || null,
+        message_type: msgType,
+        media_url: finalMediaUrl || null,
+        media_name: effectiveFilename || null,
+        direction,
+        channel,
+        sent_at: new Date().toISOString(),
+      }
+      console.log('[webhook] inserting message:', JSON.stringify(msgPayload))
       tasks.push(
-        supabase.from('messages').insert([{
-          conversation_id: conversation?.id || null,
-          sendpulse_message_id: messageId || null,
-          sender_name: contactName,
-          message_text: messageText || null,
-          message_type: msgType,
-          media_url: finalMediaUrl || null,
-          media_name: effectiveFilename || null,
-          direction,
-          channel,
-          sent_at: new Date().toISOString(),
-        }]).then(({ error: msgErr }) => {
-          if (msgErr) console.error('[webhook] message insert error:', JSON.stringify(msgErr))
-        })
+        supabase.from('messages').insert([msgPayload])
+          .then(({ error: msgErr }) => {
+            if (msgErr) console.error('[webhook] message insert error:', JSON.stringify(msgErr))
+            else console.log('[webhook] message inserted ok')
+          })
+          .catch((e: any) => console.error('[webhook] message insert threw:', e?.message))
       )
     }
 

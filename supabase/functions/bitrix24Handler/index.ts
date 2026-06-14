@@ -56,10 +56,15 @@ serve(async (req: Request) => {
 
     const event = data.event
     const accessToken = data.AUTH_ID || data.auth?.access_token || ''
+    // client_endpoint is the actual portal REST URL; server_endpoint is the generic OAuth server — never use it as the portal domain
+    const clientEndpoint = data.auth?.client_endpoint || ''
     const serverEndpoint = data.SERVER_ENDPOINT || data.auth?.server_endpoint || ''
+    const portalEndpoint = clientEndpoint || serverEndpoint
     const expiresIn = parseInt(data.AUTH_EXPIRES || data.auth?.expires_in || '3600', 10)
     const memberId = data.auth?.member_id || data.member_id || ''
     const lineId = data.data?.LINE || data.LINE
+
+    console.log(`[b24handler] event=${event} memberId=${memberId} lineId=${lineId} clientEndpoint=${clientEndpoint} serverEndpoint=${serverEndpoint}`)
 
     let bxAccount = null
     if (memberId) {
@@ -69,8 +74,15 @@ serve(async (req: Request) => {
 
     if (bxAccount && accessToken) {
       const updates: any = { access_token: accessToken, token_expires_at: new Date(Date.now() + expiresIn * 1000).toISOString() }
-      // Never overwrite domain with oauth.bitrix.info — that's the generic OAuth endpoint, not the portal REST URL
-      if (serverEndpoint && !serverEndpoint.includes('oauth.bitrix.info')) updates.domain = serverEndpoint
+      // Only store domain if it's a real portal URL — never store the generic OAuth servers
+      const isOAuthServer = (ep: string) => ep.includes('oauth.bitrix.info') || ep.includes('oauth.bitrix24.tech')
+      if (portalEndpoint && !isOAuthServer(portalEndpoint)) updates.domain = portalEndpoint
+      else if (bxAccount.domain && isOAuthServer(bxAccount.domain)) {
+        // Repair previously corrupted domain using the portal's own domain field
+        const portalHost = data.auth?.domain || ''
+        if (portalHost) updates.domain = `https://${portalHost}/rest/`
+        console.warn(`[b24handler] repairing corrupted domain: was=${bxAccount.domain} new=${updates.domain}`)
+      }
       await supabase.from('bitrix24_accounts').update(updates).eq('id', bxAccount.id)
       bxAccount = { ...bxAccount, ...updates }
     }
@@ -106,30 +118,34 @@ serve(async (req: Request) => {
         const filesFromAttach = Array.isArray(msg.message?.attach) ? msg.message.attach : []
 
         const hasContent = messageText || fileIdList.length > 0 || filesFromParams.length > 0 || filesFromAttach.length > 0 || bbCodeImages.length > 0
+        console.log(`[b24handler] msg chatId=${chatId} text="${messageText?.substring(0, 60)}" hasContent=${!!hasContent} fileIds=${fileIdList.length}`)
         if (!chatId || !hasContent) continue
 
         const bitrixMsgId = String(msg.im?.message_id || msg.message?.id || '')
         const dedupId = bitrixMsgId ? `b24_${bitrixMsgId}` : ''
         if (dedupId) {
-          const { data: existing = [], error: existingErr } = await supabase.from('messages').select('*').eq('sendpulse_message_id', dedupId).limit(1)
+          const { data: existing = [], error: existingErr } = await supabase.from('messages').select('id').eq('sendpulse_message_id', dedupId).limit(1)
           if (existingErr) throw existingErr
-          if (existing.length > 0) continue
+          if (existing.length > 0) { console.log(`[b24handler] dedup skip msgId=${dedupId}`); continue }
         }
 
-        let convs = []
+        let convs: any[] = []
         const { data: conversationsByChat = [], error: chatsErr } = await supabase.from('conversations').select('*').eq('bitrix24_chat_id', Number(chatId))
         if (chatsErr) throw chatsErr
         convs = conversationsByChat
+        console.log(`[b24handler] lookup by bitrix24_chat_id=${chatId} → found=${convs.length}`)
         if (convs.length === 0) {
           const origChatId = msg.chat?.id
+          console.log(`[b24handler] fallback lookup by sendpulse_contact_id=${origChatId}`)
           if (origChatId) {
             const { data: conversationsByContact = [], error: contactErr } = await supabase.from('conversations').select('*').eq('sendpulse_contact_id', origChatId)
             if (contactErr) throw contactErr
             convs = conversationsByContact
+            console.log(`[b24handler] fallback found=${convs.length}`)
           }
         }
         if (convs.length === 0) {
-          console.warn('No conversation for chatId:', chatId)
+          console.warn(`[b24handler] no conversation for chatId=${chatId} chat.id=${msg.chat?.id}`)
           continue
         }
         const conv = convs[0]
