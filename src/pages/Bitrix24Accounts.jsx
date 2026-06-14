@@ -253,13 +253,18 @@ export default function Bitrix24Accounts() {
   const orgId = currentMembership?.organization_id;
   const [rebinding, setRebinding] = useState(false);
 
+  const [rebindResult, setRebindResult] = useState(null);
+
   const rebindPlacements = async () => {
     setRebinding(true);
+    setRebindResult(null);
     try {
       const res = await base44.functions.invoke("bitrix24RebindPlacements", {});
       if (res.data?.error) throw new Error(res.data.error);
+      console.log("[rebind] full result:", JSON.stringify(res.data, null, 2));
+      setRebindResult(res.data?.results || []);
       const ok = res.data?.results?.filter((r) => r.ok).length ?? 0;
-      toast.success(`Placements rebound for ${ok} portal(s). Refresh the CRM page in Bitrix24.`);
+      toast.success(`Placements rebound for ${ok} portal(s).`);
     } catch (err) {
       toast.error("Rebind failed: " + err.message);
     } finally {
@@ -335,6 +340,18 @@ export default function Bitrix24Accounts() {
             </Button>
           )}
         </div>
+
+        {/* Rebind diagnostic panel */}
+        {rebindResult && rebindResult.map((r, i) => (
+          <div key={i} className="rounded-lg border border-border bg-muted/30 p-3 text-xs space-y-1 font-mono">
+            <p className="font-semibold text-sm font-sans">{r.account}</p>
+            <p>handler URL: <span className="text-muted-foreground break-all">{r.handlerUrl}</span></p>
+            <p>event.bind: <span className={r.event_bind === "✓" ? "text-emerald-600" : "text-destructive"}>{r.event_bind}</span></p>
+            <p>handler registered in B24: <span className={r.event_handler_matches ? "text-emerald-600" : "text-destructive"}>{r.event_handler_matches ? "YES ✓" : "NO ✗"}</span></p>
+            <p>registered handlers: <span className="text-muted-foreground">{JSON.stringify(r.event_registered_handlers)}</span></p>
+            <p>im_textarea: <span className={r.im_textarea === "✓" ? "text-emerald-600" : "text-destructive"}>{r.im_textarea}</span></p>
+          </div>
+        ))}
 
         {isLoading ? (
           <div className="flex justify-center py-16">
