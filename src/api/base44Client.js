@@ -14,6 +14,28 @@ export function withServiceKey(serviceKey) {
 
 let cachedProfileId = null;
 let cachedOrgId = null;
+let impersonationOrgId = null;
+// Separate client with impersonation header — tells RLS which org is active
+let _impersonationClient = null;
+
+// Returns the client to use for data queries: impersonation-scoped when active
+function getDataClient() {
+  return _impersonationClient ?? supabase;
+}
+
+export function setImpersonationOrgId(id) {
+  impersonationOrgId = id;
+  cachedOrgId = null;
+  _impersonationClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { 'x-admin-impersonating-org': id } },
+  });
+}
+
+export function clearImpersonationOrgId() {
+  impersonationOrgId = null;
+  cachedOrgId = null;
+  _impersonationClient = null;
+}
 
 async function getCurrentProfileId() {
   if (cachedProfileId) return cachedProfileId;
@@ -28,6 +50,7 @@ async function getCurrentProfileId() {
 }
 
 async function getCurrentOrgId() {
+  if (impersonationOrgId) return impersonationOrgId;
   if (cachedOrgId) return cachedOrgId;
   const { data: sessionData } = await supabase.auth.getSession();
   const user = sessionData?.session?.user;
@@ -44,6 +67,8 @@ async function getCurrentOrgId() {
 export function clearCache() {
   cachedProfileId = null;
   cachedOrgId = null;
+  impersonationOrgId = null;
+  _impersonationClient = null;
 }
 
 const ownerAwareTables = new Set([
@@ -81,7 +106,7 @@ function parseOrder(order) {
 }
 
 function buildQuery(table, filters = {}, orderBy, limit) {
-  let query = supabase.from(table).select('*');
+  let query = getDataClient().from(table).select('*');
   Object.entries(filters).forEach(([key, value]) => {
     if (value === null) {
       query = query.is(key, null);
@@ -121,17 +146,17 @@ function createEntity(tableName) {
         const orgId = await getCurrentOrgId();
         if (orgId) payload.organization_id = orgId;
       }
-      const { data, error } = await supabase.from(tableName).insert([payload]).select().limit(1).single();
+      const { data, error } = await getDataClient().from(tableName).insert([payload]).select().limit(1).single();
       if (error) throw error;
       return data;
     },
     async update(id, values) {
-      const { data, error } = await supabase.from(tableName).update(values).eq('id', id).select().limit(1).single();
+      const { data, error } = await getDataClient().from(tableName).update(values).eq('id', id).select().limit(1).single();
       if (error) throw error;
       return data;
     },
     async delete(id) {
-      const { data, error } = await supabase.from(tableName).delete().eq('id', id);
+      const { data, error } = await getDataClient().from(tableName).delete().eq('id', id);
       if (error) throw error;
       return data;
     }
@@ -219,7 +244,10 @@ export const base44 = {
   storage: {
     async uploadAttachment(file, opts = {}) {
       const path = opts.path || `${Date.now()}_${file.name}`;
-      const { data, error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
+      const uploadOpts = {};
+      if (opts.contentType) uploadOpts.contentType = opts.contentType;
+      else if (file.type) uploadOpts.contentType = file.type;
+      const { data, error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, uploadOpts);
       if (error) throw error;
       return data;
     },

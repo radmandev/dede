@@ -87,6 +87,10 @@ export async function performSendPulseDelivery(supabase: any, accountId: string,
     if (attType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(attName)) {
       return { ...contactKey, message: { type: 'image', image: { link: attLink } } }
     }
+    if (attType === 'voice') {
+      // Voice note (PTT) — WhatsApp displays with waveform. OGG/Opus or MP4/AAC.
+      return { ...contactKey, message: { type: 'voice', voice: { link: attLink } } }
+    }
     if (attType === 'audio' || /\.(mp3|ogg|wav|m4a|weba|opus)$/i.test(attName)) {
       // WhatsApp supports: aac, mp4, mpeg, amr, ogg(Opus). webm is not supported — falls through to document.
       return { ...contactKey, message: { type: 'audio', audio: { link: attLink } } }

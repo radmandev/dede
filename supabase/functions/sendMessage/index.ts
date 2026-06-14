@@ -30,6 +30,7 @@ serve(async (req: Request) => {
     if (media_url && effectiveAttachments.length === 0) {
       const attType = message_type === 'image' ? 'image'
                     : message_type === 'audio' ? 'audio'
+                    : message_type === 'voice' ? 'voice'
                     : 'document'
       effectiveAttachments = [{ link: media_url, name: media_name || 'file', type: attType }]
     }
