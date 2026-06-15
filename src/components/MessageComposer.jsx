@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Image, Paperclip, Mic, FileText, X, Upload, Plus, Trash2, Square, AlertCircle } from "lucide-react";
-import lamejs from "lamejs";
+import { Mp3Encoder } from "@breezystack/lamejs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -74,7 +74,7 @@ async function convertWebmToMp3(webmBlob) {
 
   const sampleRate = audioBuffer.sampleRate;
   const pcm = audioBuffer.getChannelData(0); // mono
-  const encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
+  const encoder = new Mp3Encoder(1, sampleRate, 128);
   const blockSize = 1152;
   const chunks = [];
 
