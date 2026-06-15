@@ -591,14 +591,14 @@ export default function MessageComposer({ conversation, onSend, isSending, error
           <button
             key={id}
             onClick={() => { setMode(id); resetForm(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-t text-xs font-medium transition-colors
               ${mode === id
                 ? "bg-background text-foreground border border-b-0 border-border"
                 : "text-muted-foreground hover:text-foreground"
               }`}
           >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
+            <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="hidden md:inline">{label}</span>
           </button>
         ))}
       </div>

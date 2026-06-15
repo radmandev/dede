@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
 import ConversationList from "../components/ConversationList";
 import MessageThread from "../components/MessageThread";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const [selectedConv, setSelectedConv] = useState(null);
+  const isMobile = useIsMobile();
 
   const { data: conversations = [] } = useQuery({
     queryKey: ["conversations"],
@@ -16,7 +18,6 @@ export default function Dashboard() {
   useEffect(() => {
     const channel = supabase.channel("realtime-dashboard");
 
-    // Directly update cache — no refetch round-trip
     channel.on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "conversations" },
@@ -38,7 +39,6 @@ export default function Dashboard() {
       }
     );
 
-    // A new message updates the conversation's last_message — handle via conversations UPDATE above
     channel.subscribe();
 
     return () => {
@@ -46,10 +46,36 @@ export default function Dashboard() {
     };
   }, [queryClient]);
 
-  // Keep selected conversation in sync with latest data
-  const currentConv = selectedConv 
+  const currentConv = selectedConv
     ? conversations.find((c) => c.id === selectedConv.id) || selectedConv
     : null;
+
+  const handleNewConversation = (conv) => {
+    queryClient.setQueryData(["conversations"], (old = []) =>
+      old.find((c) => c.id === conv.id) ? old : [conv, ...old]
+    );
+    setSelectedConv(conv);
+  };
+
+  if (isMobile) {
+    return (
+      <div className="flex w-full h-full min-w-0">
+        {currentConv ? (
+          <MessageThread
+            conversation={currentConv}
+            onBack={() => setSelectedConv(null)}
+          />
+        ) : (
+          <ConversationList
+            conversations={conversations}
+            selectedId={currentConv?.id}
+            onSelect={setSelectedConv}
+            onNewConversation={handleNewConversation}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full h-full">
@@ -59,13 +85,7 @@ export default function Dashboard() {
           conversations={conversations}
           selectedId={currentConv?.id}
           onSelect={setSelectedConv}
-          onNewConversation={(conv) => {
-            // Inject into cache if not already present, then select it
-            queryClient.setQueryData(["conversations"], (old = []) =>
-              old.find((c) => c.id === conv.id) ? old : [conv, ...old]
-            );
-            setSelectedConv(conv);
-          }}
+          onNewConversation={handleNewConversation}
         />
       </div>
 

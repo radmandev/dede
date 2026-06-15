@@ -1,13 +1,14 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
-import { MessageSquare, User } from "lucide-react";
+import { MessageSquare, User, ArrowLeft } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import ChatBubble from "./ChatBubble";
 import ChannelIcon, { channelConfig } from "./ChannelIcon";
 import MessageComposer from "./MessageComposer";
 
-export default function MessageThread({ conversation }) {
+export default function MessageThread({ conversation, onBack }) {
   const scrollRef = useRef(null);
   const queryClient = useQueryClient();
 
@@ -118,25 +119,35 @@ export default function MessageThread({ conversation }) {
   return (
     <div className="flex-1 flex flex-col bg-background h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border bg-card flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="px-4 py-3 border-b border-border bg-card flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 flex-shrink-0 -ml-1"
+              onClick={onBack}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <ChannelIcon channel={conversation.channel} size="lg" />
-          <div>
-            <h3 className="font-semibold text-foreground">{conversation.contact_name}</h3>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-foreground truncate">{conversation.contact_name}</h3>
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
               <span className={channelInfo.color}>{channelInfo.label}</span>
               <span>·</span>
-              <span>ID: {conversation.sendpulse_contact_id || "—"}</span>
+              <span className="truncate">ID: {conversation.sendpulse_contact_id || "—"}</span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <Select
             value={conversation.status}
             onValueChange={(value) => updateStatus.mutate({ id: conversation.id, status: value })}
           >
-            <SelectTrigger className="w-32 h-8 text-xs">
+            <SelectTrigger className="w-28 h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -161,7 +172,7 @@ export default function MessageThread({ conversation }) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 md:px-6 md:py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-muted border-t-primary rounded-full animate-spin" />
