@@ -22,13 +22,18 @@ import ImTemplatePanel from './pages/ImTemplatePanel';
 import Onboarding from './pages/Onboarding';
 import AcceptInvite from './pages/AcceptInvite';
 import Team from './pages/Team';
+import SuperAdminLayout from './components/SuperAdminLayout';
+import RequireSuperAdmin from './components/RequireSuperAdmin';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import SuperAdminOrgDetail from './pages/SuperAdminOrgDetail';
 
-// Guard: redirect authenticated users without an org to onboarding
+// Guard: redirect authenticated users without an org to onboarding.
+// Super admins can access the dashboard even without their own org (for impersonation).
 function RequireOrg({ children }) {
-  const { currentOrg, isLoadingAuth } = useAuth();
+  const { currentOrg, isLoadingAuth, isSuperAdmin } = useAuth();
   const location = useLocation();
   if (isLoadingAuth) return null;
-  if (!currentOrg) return <Navigate to="/onboarding" state={{ from: location }} replace />;
+  if (!currentOrg && !isSuperAdmin) return <Navigate to="/onboarding" state={{ from: location }} replace />;
   return children;
 }
 
@@ -83,7 +88,15 @@ const AuthenticatedApp = () => {
           <Route path="/sendpulse-accounts" element={<SendPulseAccounts />} />
           <Route path="/bitrix24-accounts" element={<Bitrix24Accounts />} />
           <Route path="/channels" element={<OpenChannels />} />
-          <Route path="/admin-queue" element={<AdminQueue />} />
+        </Route>
+
+        {/* Super admin section */}
+        <Route element={
+          <RequireSuperAdmin><SuperAdminLayout /></RequireSuperAdmin>
+        }>
+          <Route path="/super-admin" element={<SuperAdminDashboard />} />
+          <Route path="/super-admin/orgs/:orgId" element={<SuperAdminOrgDetail />} />
+          <Route path="/super-admin/queue" element={<AdminQueue />} />
         </Route>
       </Route>
 

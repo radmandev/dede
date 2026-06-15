@@ -1,12 +1,14 @@
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
-import { base44, supabase, clearCache } from '@/api/base44Client';
+import { base44, supabase, clearCache, setImpersonationOrgId, clearImpersonationOrgId } from '@/api/base44Client';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [currentOrg, setCurrentOrg] = useState(null);
-  const [currentMembership, setCurrentMembership] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [realOrg, setRealOrg] = useState(null);
+  const [realMembership, setRealMembership] = useState(null);
+  const [impersonatedOrg, setImpersonatedOrg] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState(null);
@@ -14,24 +16,21 @@ export const AuthProvider = ({ children }) => {
   const isAuthenticatedRef = useRef(false);
 
   useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION immediately on mount.
-    // SIGNED_IN can fire again on tab focus/token refresh — skip it if already authed
-    // to avoid showing the loading spinner unnecessarily.
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         isAuthenticatedRef.current = false;
         setUser(null);
-        setCurrentOrg(null);
-        setCurrentMembership(null);
+        setProfile(null);
+        setRealOrg(null);
+        setRealMembership(null);
+        setImpersonatedOrg(null);
         setIsAuthenticated(false);
         setIsLoadingAuth(false);
         setAuthChecked(true);
         clearCache();
       } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-        // checkUserAuth is safe to call anytime — it won't show the spinner if already authed
         checkUserAuth();
       }
-      // TOKEN_REFRESHED / USER_UPDATED: no action needed
     });
     return () => listener?.subscription?.unsubscribe?.();
   }, []);
@@ -44,15 +43,15 @@ export const AuthProvider = ({ children }) => {
       const authUser = sessionData?.session?.user || null;
       if (!authUser) {
         setUser(null);
-        setCurrentOrg(null);
-        setCurrentMembership(null);
+        setProfile(null);
+        setRealOrg(null);
+        setRealMembership(null);
         setIsAuthenticated(false);
         setIsLoadingAuth(false);
         setAuthChecked(true);
         return;
       }
 
-      // Fetch profile (plain select — no relational join to avoid schema-cache issues)
       let profile = null;
       const { data: profiles, error: pErr } = await supabase
         .from('profiles')
@@ -65,7 +64,6 @@ export const AuthProvider = ({ children }) => {
       if (profiles && profiles.length > 0) {
         profile = profiles[0];
       } else {
-        // New user — create their profile
         const { data: inserted, error: iErr } = await supabase
           .from('profiles')
           .insert([{ auth_uid: authUser.id, role: 'user', display_name: authUser.email }])
@@ -73,24 +71,23 @@ export const AuthProvider = ({ children }) => {
         if (iErr) console.error('profile insert error', iErr);
         profile = inserted;
       }
+      setProfile(profile);
 
-      // Load org from the denormalized fields on profile
       if (profile?.organization_id) {
-        // Fetch org name separately — avoids relational join RLS issues
         const { data: org } = await supabase
           .from('organizations')
           .select('id, name')
           .eq('id', profile.organization_id)
           .single();
 
-        setCurrentOrg(org ?? { id: profile.organization_id, name: '' });
-        setCurrentMembership({
+        setRealOrg(org ?? { id: profile.organization_id, name: '' });
+        setRealMembership({
           organization_id: profile.organization_id,
           role: profile.org_role || 'member',
         });
       } else {
-        setCurrentOrg(null);
-        setCurrentMembership(null);
+        setRealOrg(null);
+        setRealMembership(null);
       }
 
       setUser(authUser);
@@ -106,10 +103,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const startImpersonation = (org) => {
+    setImpersonationOrgId(org.id);
+    setImpersonatedOrg(org);
+  };
+
+  const stopImpersonation = () => {
+    clearImpersonationOrgId();
+    setImpersonatedOrg(null);
+  };
+
   const logout = (shouldRedirect = true) => {
     setUser(null);
-    setCurrentOrg(null);
-    setCurrentMembership(null);
+    setProfile(null);
+    setRealOrg(null);
+    setRealMembership(null);
+    setImpersonatedOrg(null);
     clearCache();
     base44.auth.logout(shouldRedirect ? window.location.href : undefined);
   };
@@ -118,9 +127,19 @@ export const AuthProvider = ({ children }) => {
     base44.auth.redirectToLogin(window.location.href);
   };
 
+  const currentOrg = impersonatedOrg ?? realOrg;
+  const currentMembership = impersonatedOrg
+    ? { organization_id: impersonatedOrg.id, role: 'admin' }
+    : realMembership;
+
   return (
     <AuthContext.Provider value={{
       user,
+      profile,
+      isSuperAdmin: profile?.role === 'admin',
+      impersonatedOrg,
+      startImpersonation,
+      stopImpersonation,
       currentOrg,
       currentMembership,
       isAuthenticated,

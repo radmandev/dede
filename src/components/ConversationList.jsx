@@ -24,9 +24,11 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
       const matchesStatus = statusFilter === "all" || c.status === statusFilter;
-      const matchesSearch = !search || 
-        c.contact_name?.toLowerCase().includes(search.toLowerCase()) ||
-        c.last_message_text?.toLowerCase().includes(search.toLowerCase());
+      const q = search.toLowerCase();
+      const matchesSearch = !search ||
+        c.contact_name?.toLowerCase().includes(q) ||
+        c.contact_phone?.toLowerCase().includes(q) ||
+        c.last_message_text?.toLowerCase().includes(q);
       return matchesStatus && matchesSearch;
     });
   }, [conversations, statusFilter, search]);
