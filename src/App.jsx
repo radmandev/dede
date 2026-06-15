@@ -22,6 +22,7 @@ import ImTemplatePanel from './pages/ImTemplatePanel';
 import Onboarding from './pages/Onboarding';
 import AcceptInvite from './pages/AcceptInvite';
 import Team from './pages/Team';
+import Bitrix24Users from './pages/Bitrix24Users';
 import SuperAdminLayout from './components/SuperAdminLayout';
 import RequireSuperAdmin from './components/RequireSuperAdmin';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
@@ -87,6 +88,7 @@ const AuthenticatedApp = () => {
           <Route path="/team" element={<Team />} />
           <Route path="/sendpulse-accounts" element={<SendPulseAccounts />} />
           <Route path="/bitrix24-accounts" element={<Bitrix24Accounts />} />
+          <Route path="/bitrix24-users" element={<Bitrix24Users />} />
           <Route path="/channels" element={<OpenChannels />} />
         </Route>
 

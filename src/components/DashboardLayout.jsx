@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Outlet } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
-import { MessageSquare, Settings, Send, Server, Cable, LogOut, ShieldCheck, Users, Building2 } from "lucide-react";
+import { MessageSquare, Settings, Send, Server, Cable, LogOut, ShieldCheck, Users, Building2, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: "/", icon: MessageSquare, label: "Inbox", exact: true },
   { to: "/sendpulse-accounts", icon: Send, label: "SendPulse" },
   { to: "/bitrix24-accounts", icon: Server, label: "Bitrix24" },
+  { to: "/bitrix24-users", icon: UserCheck, label: "B24 Users" },
   { to: "/channels", icon: Cable, label: "Channels" },
   { to: "/team", icon: Users, label: "Team" },
   { to: "/settings", icon: Settings, label: "Settings" },
