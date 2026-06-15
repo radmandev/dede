@@ -4,6 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageSquare, Loader2, ShieldAlert } from "lucide-react";
 
+function parseErrorMessage(err) {
+  if (!err) return "Access denied";
+  // Supabase platform errors arrive as JSON strings — extract human-readable part
+  try {
+    const parsed = JSON.parse(err);
+    return parsed.message || parsed.error || err;
+  } catch {}
+  return err;
+}
+
 function loadBx24Script() {
   return new Promise(resolve => {
     if (window.BX24) return resolve(true);
@@ -61,9 +71,9 @@ export default function WidgetLoginGate({ children }) {
             });
 
             if (error || !data?.session) {
-              const msg = data?.error || error?.message || "Access denied";
+              const raw = data?.error || error?.message || "Access denied";
               if (!cancelled) {
-                setAccessError(msg);
+                setAccessError(parseErrorMessage(raw));
                 setStatus("no-access");
               }
               return;
@@ -73,7 +83,7 @@ export default function WidgetLoginGate({ children }) {
             await supabase.auth.setSession(data.session);
           } catch (err) {
             if (!cancelled) {
-              setAccessError(err.message || "Authentication failed");
+              setAccessError(parseErrorMessage(err.message) || "Authentication failed");
               setStatus("no-access");
             }
           }

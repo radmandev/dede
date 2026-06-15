@@ -64,20 +64,18 @@ const AuthenticatedApp = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/accept-invite/:token" element={<AcceptInvite />} />
 
+      {/* Bitrix24 widget routes — NOT behind ProtectedRoute.
+           WidgetLoginGate handles auth: auto-auth via BX24.getAuth() when
+           inside a Bitrix24 iframe, email/password fallback otherwise.
+           ProtectedRoute would redirect unauthenticated users to /login
+           before WidgetLoginGate ever runs, breaking the auto-auth flow. */}
+      <Route path="/crm-chat" element={<CrmChat />} />
+      <Route path="/im-template" element={<ImTemplatePanel />} />
+
       {/* Authenticated routes */}
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         {/* Onboarding: for users without an org */}
         <Route path="/onboarding" element={<Onboarding />} />
-
-        {/* CRM Chat (org required) */}
-        <Route path="/crm-chat" element={
-          <RequireOrg><CrmChat /></RequireOrg>
-        } />
-
-        {/* IM Template Panel — Bitrix24 IM_SMILES_PANEL placement (org required) */}
-        <Route path="/im-template" element={
-          <RequireOrg><ImTemplatePanel /></RequireOrg>
-        } />
 
         {/* Main dashboard (org required) */}
         <Route element={
