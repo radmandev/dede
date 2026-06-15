@@ -305,9 +305,15 @@ export const base44 = {
   },
   functions: {
     async invoke(functionName, payload = {}) {
+      // Explicitly attach the session token — supabase.functions doesn't always
+      // inject it automatically when custom headers are provided.
+      const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: {} }));
       const options = {
         body: JSON.stringify(payload),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
       };
       const { data, error } = await supabase.functions.invoke(functionName, options);
       if (error) throw error;
