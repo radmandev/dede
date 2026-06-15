@@ -63,7 +63,7 @@ function MediaContent({ message }) {
     if (!safeUrl || imgFailed) {
       // Fallback: image URL missing or failed to load (e.g. private S3 bucket)
       return (
-        <div className={`flex items-center gap-3 min-w-[180px] p-1 rounded-lg ${isInbound ? "bg-muted/40" : "bg-white/10"}`}>
+        <div className={`flex items-center gap-3 p-1 rounded-lg ${isInbound ? "bg-muted/40" : "bg-white/10"}`}>
           <div className={`p-2.5 rounded-xl flex-shrink-0 ${isInbound ? "bg-blue-500/15 text-blue-500" : "bg-white/20 text-white"}`}>
             <ImageIcon className="h-6 w-6" />
           </div>
@@ -108,14 +108,16 @@ function MediaContent({ message }) {
   if (message_type === "audio" && media_url) {
     const safeUrl = (() => { try { return encodeURI(decodeURI(media_url)); } catch { return media_url; } })();
     return (
-      <div className="space-y-1.5 min-w-[240px]">
-        <div className="flex items-center gap-2">
+      <div className="space-y-1.5 w-full min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <Music className="h-4 w-4 flex-shrink-0 opacity-70" />
           {media_name && (
-            <span className="text-xs font-medium truncate max-w-[200px] opacity-80">{media_name}</span>
+            <span className="text-xs font-medium truncate opacity-80">{media_name}</span>
           )}
         </div>
-        <audio controls src={safeUrl} className="w-full h-9" />
+        <div className="overflow-hidden w-full">
+          <audio controls src={safeUrl} className="w-full h-9" style={{ minWidth: 0 }} />
+        </div>
       </div>
     );
   }
@@ -129,7 +131,7 @@ function MediaContent({ message }) {
         href={safeUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-3 hover:opacity-80 transition-opacity min-w-[220px] max-w-[320px]"
+        className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full min-w-0"
       >
         <div className={`p-3 rounded-xl flex-shrink-0 ${isInbound ? colorClass : "bg-white/20 text-white"}`}>
           <FileIcon className="h-6 w-6" />
@@ -183,9 +185,9 @@ export default function ChatBubble({ message }) {
 
   return (
     <div className={`flex ${isInbound ? "justify-start" : "justify-end"} mb-3`}>
-      <div className="max-w-[75%]">
+      <div className="max-w-[88%] md:max-w-[75%] min-w-0 overflow-hidden">
         <div className={`
-          px-4 py-2.5 rounded-2xl
+          px-3 py-2.5 rounded-2xl min-w-0 overflow-hidden
           ${isInbound
             ? "bg-card border border-border text-foreground rounded-bl-md"
             : "bg-primary text-primary-foreground rounded-br-md"

@@ -172,7 +172,7 @@ export default function MessageThread({ conversation, onBack }) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 md:px-6 md:py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 md:px-6 md:py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-muted border-t-primary rounded-full animate-spin" />

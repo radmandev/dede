@@ -606,7 +606,7 @@ export default function MessageComposer({ conversation, onSend, isSending, error
       {/* Compose area */}
       <div className="px-4 py-3 space-y-2">
         {mode === "text" && (
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-2 min-w-0">
             <Textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -616,8 +616,8 @@ export default function MessageComposer({ conversation, onSend, isSending, error
                   if (canSend()) handleSend();
                 }
               }}
-              placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
-              className="flex-1 min-h-[44px] max-h-32 resize-none text-sm"
+              placeholder="Type a message…"
+              className="flex-1 min-w-0 min-h-[44px] max-h-32 resize-none text-sm"
               rows={1}
             />
             <Button size="icon" onClick={handleSend} disabled={!canSend()} className="h-11 w-11 flex-shrink-0">
