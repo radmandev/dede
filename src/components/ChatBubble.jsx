@@ -108,16 +108,18 @@ function MediaContent({ message }) {
   if (message_type === "audio" && media_url) {
     const safeUrl = (() => { try { return encodeURI(decodeURI(media_url)); } catch { return media_url; } })();
     return (
-      <div className="space-y-1.5 w-full min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 overflow-hidden">
           <Music className="h-4 w-4 flex-shrink-0 opacity-70" />
           {media_name && (
             <span className="text-xs font-medium truncate opacity-80">{media_name}</span>
           )}
         </div>
-        <div className="overflow-hidden w-full">
-          <audio controls src={safeUrl} className="w-full h-9" style={{ minWidth: 0 }} />
-        </div>
+        <audio
+          controls
+          src={safeUrl}
+          className="h-9 block w-full"
+        />
       </div>
     );
   }
@@ -182,12 +184,20 @@ function MediaContent({ message }) {
 
 export default function ChatBubble({ message }) {
   const isInbound = message.direction === "inbound";
+  const isAudioMessage = message.message_type === "audio" && message.media_url;
+
+  const bubbleStyle = isAudioMessage
+    ? { width: 'calc(100vw - 2rem)', maxWidth: '340px' }
+    : { maxWidth: 'min(88%, calc(100vw - 1.5rem))' };
 
   return (
     <div className={`flex ${isInbound ? "justify-start" : "justify-end"} mb-3`}>
-      <div className="max-w-[88%] md:max-w-[75%] min-w-0 overflow-hidden">
+      <div
+        className="min-w-0 overflow-hidden md:max-w-[75%]"
+        style={bubbleStyle}
+      >
         <div className={`
-          px-3 py-2.5 rounded-2xl min-w-0 overflow-hidden
+          px-3 py-2.5 rounded-2xl overflow-hidden
           ${isInbound
             ? "bg-card border border-border text-foreground rounded-bl-md"
             : "bg-primary text-primary-foreground rounded-br-md"
