@@ -6,33 +6,78 @@ const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://joiodrhhvhxmushujxze.supa
 const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaW9kcmhodmh4bXVzaHVqeHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjUwMDgsImV4cCI6MjA5NjE0MTAwOH0.QEY6CjZvmyznF4HLoEdNjmiNIxlX-dVAtkEwxIjuwUU';
 const STORAGE_BUCKET = env.VITE_SUPABASE_STORAGE_BUCKET || 'attachments';
 
-// Cookies persist across WebView restarts (Bitrix24 mobile kills the WebView on
-// every close, clearing localStorage). Using cookie storage keeps the session alive.
+// Hybrid storage: writes to both localStorage (normal browsers, VS Code) and
+// chunked cookies (Bitrix24 mobile WebView, which clears localStorage on restart).
+// Cookies are chunked to stay under the 4 KB per-cookie limit — Supabase JWTs
+// can exceed that limit and document.cookie silently drops oversized cookies.
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
-const cookieStorage = {
+const COOKIE_CHUNK = 3000; // safe per-cookie byte budget (URL-encoded)
+const COOKIE_OPTS = `; max-age=${SESSION_MAX_AGE}; path=/; SameSite=Lax`;
+const COOKIE_EXPIRE = `; max-age=0; path=/; SameSite=Lax`;
+
+function _cookieRaw(key) {
+  const row = document.cookie.split('; ').find(r => r.startsWith(key + '='));
+  return row ? row.slice(key.length + 1) : null; // raw (still URL-encoded)
+}
+
+function cookieRead(key) {
+  const nRaw = _cookieRaw(`${key}__n`);
+  if (nRaw !== null) {
+    const n = parseInt(decodeURIComponent(nRaw), 10);
+    let assembled = '';
+    for (let i = 0; i < n; i++) {
+      const chunk = _cookieRaw(`${key}__${i}`);
+      if (chunk === null) return null;
+      assembled += chunk;
+    }
+    try { return decodeURIComponent(assembled); } catch { return null; }
+  }
+  const raw = _cookieRaw(key);
+  return raw !== null ? decodeURIComponent(raw) : null;
+}
+
+function cookieWrite(key, value) {
+  cookieDelete(key);
+  const encoded = encodeURIComponent(value);
+  if (encoded.length <= COOKIE_CHUNK) {
+    document.cookie = `${key}=${encoded}${COOKIE_OPTS}`;
+  } else {
+    const n = Math.ceil(encoded.length / COOKIE_CHUNK);
+    document.cookie = `${key}__n=${n}${COOKIE_OPTS}`;
+    for (let i = 0; i < n; i++) {
+      document.cookie = `${key}__${i}=${encoded.slice(i * COOKIE_CHUNK, (i + 1) * COOKIE_CHUNK)}${COOKIE_OPTS}`;
+    }
+  }
+}
+
+function cookieDelete(key) {
+  document.cookie = `${key}=${COOKIE_EXPIRE}`;
+  const nRaw = _cookieRaw(`${key}__n`);
+  if (nRaw !== null) {
+    const n = parseInt(decodeURIComponent(nRaw), 10);
+    document.cookie = `${key}__n=${COOKIE_EXPIRE}`;
+    for (let i = 0; i < n; i++) document.cookie = `${key}__${i}=${COOKIE_EXPIRE}`;
+  }
+}
+
+const hybridStorage = {
   getItem(key) {
-    try {
-      const match = document.cookie
-        .split('; ')
-        .find(row => row.startsWith(key + '='));
-      return match ? decodeURIComponent(match.slice(key.length + 1)) : null;
-    } catch { return null; }
+    try { const v = localStorage.getItem(key); if (v !== null) return v; } catch {}
+    try { return cookieRead(key); } catch { return null; }
   },
   setItem(key, value) {
-    try {
-      document.cookie = `${key}=${encodeURIComponent(value)}; max-age=${SESSION_MAX_AGE}; path=/; SameSite=Lax`;
-    } catch {}
+    try { localStorage.setItem(key, value); } catch {}
+    try { cookieWrite(key, value); } catch {}
   },
   removeItem(key) {
-    try {
-      document.cookie = `${key}=; max-age=0; path=/; SameSite=Lax`;
-    } catch {}
+    try { localStorage.removeItem(key); } catch {}
+    try { cookieDelete(key); } catch {}
   },
 };
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: cookieStorage,
+    storage: hybridStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
