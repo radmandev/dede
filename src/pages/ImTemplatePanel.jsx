@@ -4,6 +4,7 @@ import { Mp3Encoder } from "@breezystack/lamejs";
 import { Send, CheckCircle2, AlertCircle, Loader2, RefreshCw, X, Mic, FileText, Trash2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import WidgetLoginGate from "../components/WidgetLoginGate";
 
 // ── BX24 bridge ─────────────────────────────────────────────────────────────
 
@@ -307,7 +308,7 @@ const TABS = [
   { id: "voice",    label: "Voice",    Icon: Mic },
 ];
 
-export default function ImTemplatePanel() {
+function ImTemplatePanelWidget() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [conv, setConv] = useState(null);
@@ -336,13 +337,6 @@ export default function ImTemplatePanel() {
   useEffect(() => {
     let dead = false;
     (async () => {
-      try {
-        await base44.auth.me();
-      } catch {
-        if (!dead) { setError("Sign in required."); setLoading(false); }
-        return;
-      }
-
       await loadBx24();
 
       if (!window.BX24) {
@@ -716,5 +710,13 @@ export default function ImTemplatePanel() {
 
       </div>
     </div>
+  );
+}
+
+export default function ImTemplatePanel() {
+  return (
+    <WidgetLoginGate>
+      <ImTemplatePanelWidget />
+    </WidgetLoginGate>
   );
 }

@@ -4,6 +4,7 @@ import { MessageSquare, Plus, Phone, ChevronLeft } from "lucide-react";
 import MessageThread from "../components/MessageThread";
 import NewChatDialog from "../components/NewChatDialog";
 import { Button } from "@/components/ui/button";
+import WidgetLoginGate from "../components/WidgetLoginGate";
 
 const CRM_METHOD = {
   CRM_LEAD_DETAIL_TAB: "crm.lead.get",
@@ -123,9 +124,8 @@ function ConvItem({ conv, selected, onClick }) {
   );
 }
 
-export default function CrmChat() {
+function CrmChatWidget() {
   const [ready, setReady] = useState(false);
-  const [authErr, setAuthErr] = useState(null);
   const [entityName, setEntityName] = useState("");
   const [entityPhone, setEntityPhone] = useState("");
   const [convs, setConvs] = useState([]);
@@ -138,19 +138,6 @@ export default function CrmChat() {
     let dead = false;
 
     (async () => {
-      // Any authenticated user can use the widget
-      let me;
-      try {
-        me = await base44.auth.me();
-      } catch {
-        if (!dead) setAuthErr("Please sign in to use this widget.");
-        return;
-      }
-      if (!me) {
-        if (!dead) setAuthErr("Please sign in to use this widget.");
-        return;
-      }
-
       await loadBx24();
 
       if (!window.BX24) {
@@ -220,16 +207,6 @@ export default function CrmChat() {
   }, []);
 
   // ── Auth error ──────────────────────────────────────────────────────────────
-  if (authErr) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center text-center p-8 font-inter bg-background text-muted-foreground">
-        <MessageSquare className="h-10 w-10 opacity-30 mb-3" />
-        <p className="text-sm font-medium text-foreground mb-1">Sign in required</p>
-        <p className="text-xs">{authErr}</p>
-      </div>
-    );
-  }
-
   // ── Loading ─────────────────────────────────────────────────────────────────
   if (!ready) {
     return (
@@ -340,5 +317,13 @@ export default function CrmChat() {
         defaultPhone={entityPhone}
       />
     </div>
+  );
+}
+
+export default function CrmChat() {
+  return (
+    <WidgetLoginGate>
+      <CrmChatWidget />
+    </WidgetLoginGate>
   );
 }
