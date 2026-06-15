@@ -215,7 +215,7 @@ export default function Bitrix24Users() {
             <p className="text-sm font-medium text-foreground">No users synced yet</p>
             <p className="text-xs text-muted-foreground mt-1 mb-4">
               {accountId
-                ? "Click "Sync Users" to import all active users from your Bitrix24 portal."
+                ? 'Click "Sync Users" to import all active users from your Bitrix24 portal.'
                 : "Connect a Bitrix24 account first, then sync users."}
             </p>
           </CardContent>
