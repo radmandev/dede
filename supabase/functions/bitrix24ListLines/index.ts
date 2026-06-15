@@ -39,13 +39,27 @@ serve(async (req: Request) => {
         .is('organization_id', null)
     }
 
+    // Normalize the domain: stored values may be plain hostname, https://host, or https://host/rest/.
+    // callBitrix appends the method name directly, so /rest/ must be present.
+    let domain = account.domain || ''
+    if (!domain.startsWith('http')) domain = `https://${domain}`
+    const domainUrl = new URL(domain)
+    const restBase = `${domainUrl.protocol}//${domainUrl.host}/rest/`
+
     // imopenlines.config.list requires the 'imopenlines' scope.
-    // If the app lacks it, fall back to lines already captured in our DB.
-    const result = await callBitrix(account.domain, token, 'imopenlines.config.list', {})
+    // If the app lacks it or the call fails, fall back to lines already captured in our DB.
+    let apiError: string | null = null
+    const result = await callBitrix(restBase, token, 'imopenlines.config.list', {})
 
     let lines: { id: string; name: string }[] = []
 
-    if (!result?.error) {
+    if (result?.error) {
+      apiError = result.error_description || result.error || 'B24 API error'
+      console.error('[bitrix24ListLines] imopenlines.config.list error:', apiError)
+    } else if (result?.raw) {
+      apiError = 'Unexpected non-JSON response from Bitrix24 (domain may be misconfigured)'
+      console.error('[bitrix24ListLines] raw response:', String(result.raw).slice(0, 200))
+    } else {
       let raw: any[] = []
       if (Array.isArray(result?.result)) {
         raw = result.result
@@ -78,7 +92,7 @@ serve(async (req: Request) => {
         }))
     }
 
-    return makeJsonResponse({ lines })
+    return makeJsonResponse({ lines, api_error: apiError })
   } catch (error) {
     console.error('bitrix24ListLines error:', error)
     return makeJsonResponse({ error: String(error) }, 500)

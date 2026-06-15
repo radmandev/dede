@@ -102,15 +102,17 @@ export default function OpenChannels() {
   const { data: bxAccounts = [] } = useQuery({ queryKey: ["bitrix24Accounts"], queryFn: () => base44.entities.Bitrix24Account.list() });
   const { data: spAccounts = [] } = useQuery({ queryKey: ["sendpulseAccounts"], queryFn: () => base44.entities.SendPulseAccount.list() });
 
-  const { data: lines = [], isLoading: linesLoading } = useQuery({
+  const { data: linesResult = { lines: [], api_error: null }, isLoading: linesLoading } = useQuery({
     queryKey: ["bxLines", form.bitrix24_account_id],
     queryFn: async () => {
       const res = await base44.functions.invoke("bitrix24ListLines", { bitrix24_account_id: form.bitrix24_account_id });
       if (res.data?.error) throw new Error(res.data.error);
-      return res.data?.lines || [];
+      return { lines: res.data?.lines || [], api_error: res.data?.api_error || null };
     },
     enabled: sheetOpen && !!form.bitrix24_account_id,
   });
+  const lines = linesResult.lines;
+  const linesApiError = linesResult.api_error;
 
   const { data: bots = [] } = useQuery({
     queryKey: ["sendpulseBots", form.sendpulse_account_id],
@@ -382,6 +384,8 @@ export default function OpenChannels() {
                           ? "Pick a portal first"
                           : linesLoading
                           ? "Loading lines…"
+                          : lines.length === 0
+                          ? "No lines found — enter ID below"
                           : "Select an open line"
                       }
                     />
@@ -392,6 +396,32 @@ export default function OpenChannels() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* Show reason + manual fallback when no lines are available */}
+                {form.bitrix24_account_id && !linesLoading && lines.length === 0 && (
+                  <div className="rounded-md bg-amber-50 border border-amber-200 p-3 space-y-2">
+                    <div className="flex gap-2 text-xs text-amber-800">
+                      <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                      <div>
+                        {linesApiError
+                          ? <><strong>Bitrix24 API error:</strong> {linesApiError}. Enter the line ID manually below.</>
+                          : <>No open lines found via API. In Bitrix24, go to <strong>Open Lines → Channels</strong> and enable this connector for a line, then re-open this form. Or enter the line ID manually below.</>
+                        }
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Line ID (manual)</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 1"
+                        value={form.bitrix24_line_id}
+                        onChange={(e) => setForm({ ...form, bitrix24_line_id: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
