@@ -218,7 +218,7 @@ function CrmChatWidget() {
 
   // ── Widget ──────────────────────────────────────────────────────────────────
   return (
-    <div className="h-screen flex font-inter bg-background overflow-hidden">
+    <div className="h-[100dvh] flex font-inter bg-background overflow-hidden">
 
       {/* ── Left sidebar (always visible on wide; hidden when thread shown on narrow) ── */}
       <div

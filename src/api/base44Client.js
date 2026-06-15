@@ -6,7 +6,38 @@ const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://joiodrhhvhxmushujxze.supa
 const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaW9kcmhodmh4bXVzaHVqeHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjUwMDgsImV4cCI6MjA5NjE0MTAwOH0.QEY6CjZvmyznF4HLoEdNjmiNIxlX-dVAtkEwxIjuwUU';
 const STORAGE_BUCKET = env.VITE_SUPABASE_STORAGE_BUCKET || 'attachments';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Cookies persist across WebView restarts (Bitrix24 mobile kills the WebView on
+// every close, clearing localStorage). Using cookie storage keeps the session alive.
+const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
+const cookieStorage = {
+  getItem(key) {
+    try {
+      const match = document.cookie
+        .split('; ')
+        .find(row => row.startsWith(key + '='));
+      return match ? decodeURIComponent(match.slice(key.length + 1)) : null;
+    } catch { return null; }
+  },
+  setItem(key, value) {
+    try {
+      document.cookie = `${key}=${encodeURIComponent(value)}; max-age=${SESSION_MAX_AGE}; path=/; SameSite=Lax`;
+    } catch {}
+  },
+  removeItem(key) {
+    try {
+      document.cookie = `${key}=; max-age=0; path=/; SameSite=Lax`;
+    } catch {}
+  },
+};
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: cookieStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
 
 export function withServiceKey(serviceKey) {
   return createClient(SUPABASE_URL, serviceKey);

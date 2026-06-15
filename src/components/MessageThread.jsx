@@ -117,7 +117,7 @@ export default function MessageThread({ conversation, onBack }) {
   const channelInfo = channelConfig[conversation.channel] || channelConfig.telegram;
 
   return (
-    <div className="flex-1 flex flex-col bg-background h-full">
+    <div className="flex-1 flex flex-col bg-background min-h-0 w-0 min-w-full overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b border-border bg-card flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">

@@ -491,7 +491,7 @@ function ImTemplatePanelWidget() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-background">
+      <div className="h-[100dvh] flex items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -499,7 +499,7 @@ function ImTemplatePanelWidget() {
 
   if (error) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
+      <div className="h-[100dvh] flex flex-col items-center justify-center p-6 text-center bg-background">
         <AlertCircle className="h-8 w-8 text-destructive mb-2 opacity-60" />
         <p className="text-sm text-muted-foreground">{error}</p>
       </div>
@@ -508,7 +508,7 @@ function ImTemplatePanelWidget() {
 
   if (sent) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
+      <div className="h-[100dvh] flex flex-col items-center justify-center p-6 text-center bg-background">
         <CheckCircle2 className="h-10 w-10 text-emerald-500 mb-3" />
         <p className="text-sm font-medium">{sentLabel}</p>
         <p className="text-xs text-muted-foreground mt-1">
@@ -519,7 +519,7 @@ function ImTemplatePanelWidget() {
   }
 
   return (
-    <div className="h-screen overflow-y-auto bg-background font-inter">
+    <div className="h-[100dvh] overflow-y-auto bg-background font-inter">
 
       {/* Contact header */}
       <div className="px-4 pt-4 pb-3 border-b border-border/50">
