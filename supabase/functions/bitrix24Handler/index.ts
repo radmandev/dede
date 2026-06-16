@@ -203,8 +203,23 @@ serve(async (req: Request) => {
           if (spToken) {
             try {
               await performSendPulseDelivery(supabase, spAccount.id, conv.channel || 'whatsapp', conv.sendpulse_contact_id, messageText, attachments)
-            } catch (err) {
-              console.error('SendPulse delivery failed:', err)
+            } catch (err: any) {
+              console.error('[b24handler] SendPulse delivery failed:', err)
+
+              // Notify the agent in the Bitrix24 chat so the failure isn't silent
+              if (conv.bitrix24_chat_id && b24Endpoint && b24Token) {
+                const errMsg = String(err?.message || err || '')
+                const is24hWindow = /131047|24.?hour|window|unsubscribed.?contact|re.?engagement|not.*window|outside.*window/i.test(errMsg)
+                const notifyText = is24hWindow
+                  ? '[b]⚠ Message not delivered — 24-hour window expired[/b]\nWhatsApp only allows free-form messages within 24 hours of the customer\'s last reply. To re-engage this contact, use an [b]approved template message[/b].'
+                  : `[b]⚠ Message not delivered[/b]\nSendPulse returned an error: ${errMsg.replace(/^sendpulse \w+ failed: \d+ /, '').substring(0, 300)}`
+
+                await callBitrix(b24Endpoint, b24Token, 'im.message.add', {
+                  CHAT_ID: conv.bitrix24_chat_id,
+                  MESSAGE: notifyText,
+                  SYSTEM: 'Y',
+                }).catch((e: any) => console.error('[b24handler] failed to post delivery-failure notice:', e))
+              }
             }
           }
         }
