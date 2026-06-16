@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { RefreshCw, Users, ShieldAlert, Crown, AlertCircle, Loader2 } from "lucide-react";
+import { RefreshCw, Users, ShieldAlert, Crown, AlertCircle, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 function Avatar({ name, photoUrl, size = "md" }) {
@@ -37,17 +38,20 @@ function Avatar({ name, photoUrl, size = "md" }) {
 }
 
 function UserRow({ user, isAdmin, onPermissionChange, updating }) {
-  const isActive = user.permission === "active";
-  const isDisabled = user.permission === "disabled";
+  const hasAccess = user.permission === "active";
+  const isInactiveInB24 = user.is_active === false;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+    <div className={`flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors ${isInactiveInB24 ? "opacity-60" : ""}`}>
       <Avatar name={user.name} photoUrl={user.photo_url} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-sm font-medium truncate">{user.name || `User #${user.b24_user_id}`}</span>
           {user.is_b24_admin && (
             <Crown className="h-3 w-3 text-amber-500 flex-shrink-0" title="Bitrix24 admin" />
+          )}
+          {isInactiveInB24 && (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">Inactive in B24</Badge>
           )}
         </div>
         <p className="text-xs text-muted-foreground truncate">
@@ -59,29 +63,26 @@ function UserRow({ user, isAdmin, onPermissionChange, updating }) {
       <div className="flex items-center gap-2.5 flex-shrink-0">
         {user.last_seen_at && (
           <span className="text-[11px] text-muted-foreground hidden sm:block">
-            {new Date(user.last_seen_at).toLocaleDateString()}
+            Last seen {new Date(user.last_seen_at).toLocaleDateString()}
           </span>
         )}
-        <Badge
-          variant={isActive ? "default" : isDisabled ? "destructive" : "secondary"}
-          className="text-[10px] hidden sm:flex"
-        >
-          {user.permission}
-        </Badge>
+        <span className={`text-[11px] font-medium hidden sm:block ${hasAccess ? "text-emerald-600" : "text-muted-foreground"}`}>
+          {hasAccess ? "Has access" : "No access"}
+        </span>
         {isAdmin ? (
           updating === user.id ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : (
             <Switch
-              checked={isActive}
+              checked={hasAccess}
               onCheckedChange={checked =>
                 onPermissionChange(user.id, checked ? "active" : "disabled")
               }
-              aria-label={`${isActive ? "Disable" : "Enable"} access for ${user.name}`}
+              aria-label={`${hasAccess ? "Revoke" : "Grant"} widget access for ${user.name}`}
             />
           )
         ) : (
-          <Switch checked={isActive} disabled aria-label="Access status" />
+          <Switch checked={hasAccess} disabled aria-label="Access status" />
         )}
       </div>
     </div>
@@ -95,6 +96,8 @@ export default function Bitrix24Users() {
 
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [updatingId, setUpdatingId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [accessFilter, setAccessFilter] = useState("all"); // "all" | "active" | "none"
 
   // Load B24 accounts for the org
   const { data: accounts = [], isLoading: loadingAccounts } = useQuery({
@@ -155,6 +158,20 @@ export default function Bitrix24Users() {
   const activeCount = users.filter(u => u.permission === "active").length;
   const selectedAccount = accounts.find(a => a.id === accountId);
 
+  const filteredUsers = useMemo(() => {
+    return users.filter(u => {
+      const q = search.toLowerCase();
+      const matchesSearch = !search ||
+        (u.name || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        (u.department || "").toLowerCase().includes(q);
+      const matchesAccess = accessFilter === "all" ||
+        (accessFilter === "active" && u.permission === "active") ||
+        (accessFilter === "none" && u.permission !== "active");
+      return matchesSearch && matchesAccess;
+    });
+  }, [users, search, accessFilter]);
+
   if (!isAdmin) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted-foreground">
@@ -170,12 +187,12 @@ export default function Bitrix24Users() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground">Bitrix24 Users</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Sync users from your Bitrix24 portal and control who can access the widget without logging in.
+          Sync all users from your Bitrix24 portal. Toggle the switch to grant or revoke widget access — no invite needed.
         </p>
       </div>
 
       {/* Controls row */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         {accounts.length > 1 && (
           <Select
             value={accountId}
@@ -207,6 +224,31 @@ export default function Bitrix24Users() {
         </Button>
       </div>
 
+      {/* Search + filter row */}
+      {users.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by name, email, department…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9 h-9 text-sm"
+            />
+          </div>
+          <Select value={accessFilter} onValueChange={setAccessFilter}>
+            <SelectTrigger className="w-full sm:w-40 h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All users</SelectItem>
+              <SelectItem value="active">Has access</SelectItem>
+              <SelectItem value="none">No access</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {/* Info card */}
       {users.length === 0 && !loadingUsers ? (
         <Card>
@@ -231,7 +273,7 @@ export default function Bitrix24Users() {
                 <CardDescription className="text-xs mt-0.5">
                   {loadingUsers
                     ? "Loading…"
-                    : `${users.length} users · ${activeCount} with access`}
+                    : `${filteredUsers.length}${filteredUsers.length !== users.length ? ` of ${users.length}` : ""} users · ${activeCount} with widget access`}
                 </CardDescription>
               </div>
               {!isAdmin && (
@@ -249,7 +291,11 @@ export default function Bitrix24Users() {
             </CardContent>
           ) : (
             <div className="divide-y divide-border">
-              {users.map(user => (
+              {filteredUsers.length === 0 ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  No users match the current filter.
+                </div>
+              ) : filteredUsers.map(user => (
                 <UserRow
                   key={user.id}
                   user={user}

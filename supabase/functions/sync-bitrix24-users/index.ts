@@ -57,16 +57,22 @@ serve(async (req: Request) => {
     const token = await ensureBitrixToken(supabase, account)
     if (!token) return jsonResponse({ error: 'Could not obtain Bitrix24 token. Reconnect the account.' }, 500)
 
-    const endpoint = `https://${account.domain}/rest/`
+    // Normalize domain — stored values may be 'host', 'https://host', or 'https://host/rest/'
+    let domainRaw = account.domain || ''
+    if (!domainRaw.startsWith('http')) domainRaw = `https://${domainRaw}`
+    const domainUrl = new URL(domainRaw)
+    const restBase = `${domainUrl.protocol}//${domainUrl.host}/rest/`
 
-    // Fetch all active users from Bitrix24 (paginated)
+    // Fetch ALL users from Bitrix24 (paginated, 50 per page)
+    // No ACTIVE filter — import everyone so the admin can decide who gets access.
     const allUsers: any[] = []
     let start = 0
-    for (let page = 0; page < 50; page++) { // cap at 50 pages (5000 users)
-      const res = await callBitrix(endpoint, token, 'user.get', {
-        FILTER: { ACTIVE: true },
-        start,
-      })
+    for (let page = 0; page < 100; page++) { // cap at 100 pages (5000 users)
+      const res = await callBitrix(restBase, token, 'user.get', { start })
+      if (res?.error) {
+        console.error('[sync-bitrix24-users] user.get error:', res.error, res.error_description)
+        break
+      }
       const batch: any[] = res?.result ?? []
       allUsers.push(...batch)
       if (!res?.next || batch.length === 0) break
@@ -77,7 +83,9 @@ serve(async (req: Request) => {
       return jsonResponse({ users: [], synced: 0 })
     }
 
-    // Build upsert rows — preserve existing permission values by using onConflict merge
+    // Build upsert rows — `permission` and `auth_user_id` are NOT included so
+    // the DB INSERT...ON CONFLICT DO UPDATE only touches the profile columns.
+    const now = new Date().toISOString()
     const rows = allUsers.map(u => ({
       organization_id: account.organization_id,
       bitrix24_account_id: account.id,
@@ -88,18 +96,22 @@ serve(async (req: Request) => {
       title: u.WORK_POSITION || null,
       photo_url: u.PERSONAL_PHOTO || null,
       is_b24_admin: u.IS_ADMIN === 'Y' || u.IS_ADMIN === true,
-      updated_at: new Date().toISOString(),
+      is_active: u.ACTIVE === 'Y' || u.ACTIVE === true,
+      updated_at: now,
     }))
 
-    // Upsert without touching `permission` or `auth_user_id` for existing rows
-    const { error: upsertErr } = await supabase
-      .from('bitrix24_portal_users')
-      .upsert(rows, {
-        onConflict: 'bitrix24_account_id,b24_user_id',
-        ignoreDuplicates: false,
-      })
-
-    if (upsertErr) throw upsertErr
+    // Upsert in batches of 200 to stay within request size limits
+    const BATCH = 200
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH)
+      const { error: upsertErr } = await supabase
+        .from('bitrix24_portal_users')
+        .upsert(batch, {
+          onConflict: 'bitrix24_account_id,b24_user_id',
+          ignoreDuplicates: false,
+        })
+      if (upsertErr) throw upsertErr
+    }
 
     // Return the full updated list
     const { data: fullList, error: listErr } = await supabase

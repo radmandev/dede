@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS bitrix24_portal_users (
   title                TEXT,
   photo_url            TEXT,
   is_b24_admin         BOOLEAN     DEFAULT FALSE,
+  is_active            BOOLEAN     DEFAULT TRUE,  -- mirrors ACTIVE flag from B24
   last_seen_at         TIMESTAMPTZ,
   created_at           TIMESTAMPTZ DEFAULT NOW(),
   updated_at           TIMESTAMPTZ DEFAULT NOW(),
