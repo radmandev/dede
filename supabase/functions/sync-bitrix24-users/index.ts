@@ -63,12 +63,12 @@ serve(async (req: Request) => {
     const domainUrl = new URL(domainRaw)
     const restBase = `${domainUrl.protocol}//${domainUrl.host}/rest/`
 
-    // Fetch ALL users from Bitrix24 (paginated, 50 per page)
-    // No ACTIVE filter — import everyone so the admin can decide who gets access.
+    // Fetch active users from Bitrix24 (paginated, 50 per page)
+    // ACTIVE: true excludes dismissed/deactivated users.
     const allUsers: any[] = []
     let start = 0
     for (let page = 0; page < 100; page++) { // cap at 100 pages (5000 users)
-      const res = await callBitrix(restBase, token, 'user.get', { start })
+      const res = await callBitrix(restBase, token, 'user.get', { FILTER: { ACTIVE: true }, start })
       if (res?.error) {
         console.error('[sync-bitrix24-users] user.get error:', res.error, res.error_description)
         break
