@@ -186,15 +186,11 @@ export default function ChatBubble({ message }) {
   const isInbound = message.direction === "inbound";
   const isAudioMessage = message.message_type === "audio" && message.media_url;
 
-  const bubbleStyle = isAudioMessage
-    ? { width: 'calc(100vw - 2rem)', maxWidth: '340px' }
-    : { maxWidth: 'min(88%, calc(100vw - 1.5rem))' };
-
   return (
     <div className={`flex ${isInbound ? "justify-start" : "justify-end"} mb-3`}>
       <div
-        className="min-w-0 overflow-hidden md:max-w-[75%]"
-        style={bubbleStyle}
+        className={`min-w-0 overflow-hidden max-w-[85%] md:max-w-[65%] ${isAudioMessage ? "w-full" : ""}`}
+        style={isAudioMessage ? { maxWidth: '340px' } : undefined}
       >
         <div className={`
           px-3 py-2.5 rounded-2xl overflow-hidden
