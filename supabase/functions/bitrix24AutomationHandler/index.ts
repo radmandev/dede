@@ -150,32 +150,33 @@ serve(async (req: Request) => {
     const channel = bot.channel || 'whatsapp'
     console.log(`[b24automation] sending type=${type} phone=${phone} bot=${bot.id} template=${templateName || '-'}`)
 
-    // Send the message and capture the SP response to extract contact_id
-    let spContactId: string | null = null
+    // Always resolve the conversation first — we need sendpulse_contact_id for text sends,
+    // and we need the conversation id for message persistence either way
+    const conversation = await findConversation(bot.id, null, phone)
+    const spContactId = conversation?.sendpulse_contact_id || null
+    console.log(`[b24automation] conversation=${conversation?.id || 'none'} spContactId=${spContactId || 'none'}`)
 
     if (type === 'template') {
-      const result = await sendTemplateMessage(
-        supabase, bot.sendpulse_account_id, phone,
+      // Templates can be sent by phone via sendTemplateByPhone — no existing contact needed
+      const sendId = spContactId || phone  // prefer known contact_id, fall back to phone
+      await sendTemplateMessage(
+        supabase, bot.sendpulse_account_id, sendId,
         templateName, templateLanguage, templateParams, '', '', bot.id,
       )
-      try {
-        const parsed = JSON.parse(result?.body || '{}')
-        spContactId = parsed?.data?.contact_id || null
-      } catch { /* ignore parse errors */ }
     } else {
-      const results = await performSendPulseDelivery(
-        supabase, bot.sendpulse_account_id, channel, phone, messageText, [], bot.id,
+      // Plain-text sends REQUIRE a contact_id — SP rejects phone-based text sends
+      if (!spContactId) {
+        console.warn(`[b24automation] no SP contact_id for phone=${phone} — cannot send text without an existing conversation (use a template to re-engage)`)
+        return new Response('OK', { status: 200 })
+      }
+      await performSendPulseDelivery(
+        supabase, bot.sendpulse_account_id, channel, spContactId, messageText, [], bot.id,
       )
-      try {
-        const parsed = JSON.parse(results?.[0]?.body || '{}')
-        spContactId = parsed?.data?.contact_id || null
-      } catch { /* ignore parse errors */ }
     }
 
-    console.log(`[b24automation] sent ok spContactId=${spContactId || 'unknown'}`)
+    console.log(`[b24automation] sent ok`)
 
-    // Find existing conversation so we can show the message in the app
-    const conversation = await findConversation(bot.id, spContactId, phone)
+    // Persist to DB so the message shows in the app
     if (conversation) {
       const msgText = type === 'template' ? templateName : messageText
       const msgType = type === 'template' ? 'template' : 'text'
