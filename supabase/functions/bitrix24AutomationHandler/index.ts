@@ -1,4 +1,4 @@
-import { handleCors, jsonResponse } from '../lib/cors.ts'
+import { handleCors } from '../lib/cors.ts'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 import { parseNestedForm } from '../lib/bitrix24.ts'
@@ -12,6 +12,43 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
 function normalizePhone(raw: string): string {
   const cleaned = raw.trim().replace(/[\s\-().]/g, '')
   return cleaned.startsWith('+') ? cleaned.slice(1) : cleaned
+}
+
+// Find an existing conversation by SP contact_id or by phone number
+async function findConversation(botId: string, spContactId: string | null, phoneDigits: string) {
+  if (spContactId) {
+    const { data } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('sendpulse_contact_id', spContactId)
+      .eq('sendpulse_bot_id', botId)
+      .limit(1)
+    if (data?.[0]) return data[0]
+  }
+
+  // Fallback: match by phone stored with or without leading +
+  const { data } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('sendpulse_bot_id', botId)
+    .or(`contact_phone.eq.+${phoneDigits},contact_phone.eq.${phoneDigits}`)
+    .limit(1)
+  return data?.[0] || null
+}
+
+// Persist the outbound message and update conversation timestamps
+async function persistMessage(conversationId: string, text: string, msgType: string, channel: string) {
+  await supabase.from('messages').insert([{
+    conversation_id: conversationId,
+    message_text: text,
+    message_type: msgType,
+    direction: 'outbound',
+    channel,
+  }])
+  await supabase.from('conversations').update({
+    last_message_text: text,
+    last_message_at: new Date().toISOString(),
+  }).eq('id', conversationId)
 }
 
 serve(async (req: Request) => {
@@ -44,7 +81,6 @@ serve(async (req: Request) => {
     const templateParams = templateParamsRaw
       ? templateParamsRaw.split(',').map((s: string) => s.trim()).filter(Boolean)
       : []
-    // Optional override: admin can paste our sendpulse_bots.id to select a specific bot
     const botIdOverride = (properties.BOT_ID || '').trim()
 
     console.log(`[b24automation] type=${type} memberId=${memberId} phone=${rawPhone} botIdOverride=${botIdOverride}`)
@@ -53,23 +89,20 @@ serve(async (req: Request) => {
       console.warn('[b24automation] no phone — skipping')
       return new Response('OK', { status: 200 })
     }
-
     if (type === 'message' && !messageText) {
       console.warn('[b24automation] no message text — skipping')
       return new Response('OK', { status: 200 })
     }
-
     if (type === 'template' && !templateName) {
       console.warn('[b24automation] no template name — skipping')
       return new Response('OK', { status: 200 })
     }
-
-    // Resolve Bitrix24 account
     if (!memberId) {
       console.warn('[b24automation] no member_id — skipping')
       return new Response('OK', { status: 200 })
     }
 
+    // Resolve Bitrix24 account
     const { data: accountRows } = await supabase
       .from('bitrix24_accounts')
       .select('*')
@@ -91,9 +124,7 @@ serve(async (req: Request) => {
         .limit(1)
       bot = rows?.[0] || null
     }
-
     if (!bot) {
-      // Auto-detect: find a channel linked to this B24 account that has a bot
       const { data: channels } = await supabase
         .from('bitrix24_open_channels')
         .select('*')
@@ -110,40 +141,50 @@ serve(async (req: Request) => {
         bot = bots?.[0] || null
       }
     }
-
     if (!bot) {
       console.warn(`[b24automation] no SendPulse bot found for B24 account ${bxAccount.id}`)
       return new Response('OK', { status: 200 })
     }
 
     const phone = normalizePhone(rawPhone)
+    const channel = bot.channel || 'whatsapp'
     console.log(`[b24automation] sending type=${type} phone=${phone} bot=${bot.id} template=${templateName || '-'}`)
 
+    // Send the message and capture the SP response to extract contact_id
+    let spContactId: string | null = null
+
     if (type === 'template') {
-      await sendTemplateMessage(
-        supabase,
-        bot.sendpulse_account_id,
-        phone,
-        templateName,
-        templateLanguage,
-        templateParams,
-        '',   // no header media
-        '',
-        bot.id,
+      const result = await sendTemplateMessage(
+        supabase, bot.sendpulse_account_id, phone,
+        templateName, templateLanguage, templateParams, '', '', bot.id,
       )
+      try {
+        const parsed = JSON.parse(result?.body || '{}')
+        spContactId = parsed?.data?.contact_id || null
+      } catch { /* ignore parse errors */ }
     } else {
-      await performSendPulseDelivery(
-        supabase,
-        bot.sendpulse_account_id,
-        bot.channel || 'whatsapp',
-        phone,
-        messageText,
-        [],
-        bot.id,
+      const results = await performSendPulseDelivery(
+        supabase, bot.sendpulse_account_id, channel, phone, messageText, [], bot.id,
       )
+      try {
+        const parsed = JSON.parse(results?.[0]?.body || '{}')
+        spContactId = parsed?.data?.contact_id || null
+      } catch { /* ignore parse errors */ }
     }
 
-    console.log(`[b24automation] done type=${type} phone=${phone}`)
+    console.log(`[b24automation] sent ok spContactId=${spContactId || 'unknown'}`)
+
+    // Find existing conversation so we can show the message in the app
+    const conversation = await findConversation(bot.id, spContactId, phone)
+    if (conversation) {
+      const msgText = type === 'template' ? templateName : messageText
+      const msgType = type === 'template' ? 'template' : 'text'
+      await persistMessage(conversation.id, msgText, msgType, channel)
+      console.log(`[b24automation] message persisted to conversation=${conversation.id}`)
+    } else {
+      console.warn(`[b24automation] no conversation found for phone=${phone} bot=${bot.id} — message sent but not shown in app`)
+    }
+
     return new Response('OK', { status: 200 })
 
   } catch (err) {
