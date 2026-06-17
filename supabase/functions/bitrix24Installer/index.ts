@@ -250,7 +250,10 @@ serve(async (req: Request) => {
         })
       }
 
-      // ── Automation rule robots ────────────────────────────────────────────
+    }
+
+    // ── Automation rule robots — runs for ANY placement ───────────────────────
+    if (serverEndpoint) {
       const automationHandlerBase = `${functionsBase}/bitrix24AutomationHandler`
       const crmDocumentFilter = {
         INCLUDE: [
@@ -274,9 +277,16 @@ serve(async (req: Request) => {
         Multiple: 'N',
       }
 
+      const scopeCheckRes = await callBitrix(serverEndpoint, accessToken, 'scope', {})
+      console.log('[installer] app scopes:', JSON.stringify(scopeCheckRes?.result || scopeCheckRes))
+
+      const robotListRes = await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.list', {})
+      console.log('[installer] bizproc.robot.list result:', JSON.stringify(robotListRes))
+
       // Robot 1 — Send WhatsApp Message
-      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_message' }).catch(() => null)
-      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
+      const del1Res = await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_message' }).catch((e: any) => ({ caught: String(e) }))
+      console.log('[installer] robot delete (1):', JSON.stringify(del1Res))
+      const add1Res = await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
         CODE: 'noqtachat_send_wa_message',
         HANDLER: `${automationHandlerBase}?type=message`,
         NAME: { en: 'noqtaChat: Send WhatsApp Message', ar: 'noqtaChat: إرسال رسالة واتساب' },
@@ -295,11 +305,12 @@ serve(async (req: Request) => {
           BOT_ID: botIdProperty,
         },
       })
-      console.log('[installer] bizproc robot registered: noqtachat_send_wa_message')
+      console.log('[installer] bizproc.robot.add (send_wa_message):', JSON.stringify(add1Res))
 
       // Robot 2 — Send WhatsApp Template
-      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_template' }).catch(() => null)
-      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
+      const del2Res = await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_template' }).catch((e: any) => ({ caught: String(e) }))
+      console.log('[installer] robot delete (2):', JSON.stringify(del2Res))
+      const add2Res = await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
         CODE: 'noqtachat_send_wa_template',
         HANDLER: `${automationHandlerBase}?type=template`,
         NAME: { en: 'noqtaChat: Send WhatsApp Template', ar: 'noqtaChat: إرسال قالب واتساب' },
@@ -333,7 +344,7 @@ serve(async (req: Request) => {
           BOT_ID: botIdProperty,
         },
       })
-      console.log('[installer] bizproc robot registered: noqtachat_send_wa_template')
+      console.log('[installer] bizproc.robot.add (send_wa_template):', JSON.stringify(add2Res))
     }
 
     // ── SETTING_CONNECTOR / CONTACT_CENTER: activate connector for a line ────
