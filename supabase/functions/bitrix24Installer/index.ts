@@ -249,6 +249,91 @@ serve(async (req: Request) => {
           },
         })
       }
+
+      // ── Automation rule robots ────────────────────────────────────────────
+      const automationHandlerBase = `${functionsBase}/bitrix24AutomationHandler`
+      const crmDocumentFilter = {
+        INCLUDE: [
+          ['crm', 'CCrmDocumentLead'],
+          ['crm', 'CCrmDocumentDeal'],
+          ['crm', 'CCrmDocumentContact'],
+        ],
+      }
+      const phoneProperty = {
+        Name: { en: 'Phone number', ar: 'رقم الهاتف' },
+        Description: { en: 'Recipient phone in E.164 format. Use {=Document:PHONE} to pull from the CRM record.', ar: 'رقم المستلم. استخدم {=Document:PHONE} للسحب من السجل.' },
+        Type: 'string',
+        Required: 'Y',
+        Multiple: 'N',
+      }
+      const botIdProperty = {
+        Name: { en: 'Bot ID (optional)', ar: 'معرّف البوت (اختياري)' },
+        Description: { en: 'Leave empty to auto-detect. Paste the bot row ID from noqtaChat Open Channels to target a specific bot.', ar: 'اتركه فارغاً للاكتشاف التلقائي.' },
+        Type: 'string',
+        Required: 'N',
+        Multiple: 'N',
+      }
+
+      // Robot 1 — Send WhatsApp Message
+      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_message' }).catch(() => null)
+      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
+        CODE: 'noqtachat_send_wa_message',
+        HANDLER: `${automationHandlerBase}?type=message`,
+        NAME: { en: 'noqtaChat: Send WhatsApp Message', ar: 'noqtaChat: إرسال رسالة واتساب' },
+        DESCRIPTION: { en: 'Send a free-text WhatsApp message via noqtaChat / SendPulse.', ar: 'إرسال رسالة واتساب نصية عبر noqtaChat.' },
+        USE_SUBSCRIPTION: 'N',
+        FILTER: crmDocumentFilter,
+        PROPERTIES: {
+          PHONE: phoneProperty,
+          MESSAGE_TEXT: {
+            Name: { en: 'Message text', ar: 'نص الرسالة' },
+            Description: { en: 'The text to send. Supports Bitrix24 variables like {=Document:TITLE}.', ar: 'النص المراد إرساله. يدعم متغيرات Bitrix24 مثل {=Document:TITLE}.' },
+            Type: 'text',
+            Required: 'Y',
+            Multiple: 'N',
+          },
+          BOT_ID: botIdProperty,
+        },
+      })
+      console.log('[installer] bizproc robot registered: noqtachat_send_wa_message')
+
+      // Robot 2 — Send WhatsApp Template
+      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.delete', { CODE: 'noqtachat_send_wa_template' }).catch(() => null)
+      await callBitrix(serverEndpoint, accessToken, 'bizproc.robot.add', {
+        CODE: 'noqtachat_send_wa_template',
+        HANDLER: `${automationHandlerBase}?type=template`,
+        NAME: { en: 'noqtaChat: Send WhatsApp Template', ar: 'noqtaChat: إرسال قالب واتساب' },
+        DESCRIPTION: { en: 'Send an approved WhatsApp template message via noqtaChat / SendPulse.', ar: 'إرسال رسالة قالب واتساب معتمدة عبر noqtaChat.' },
+        USE_SUBSCRIPTION: 'N',
+        FILTER: crmDocumentFilter,
+        PROPERTIES: {
+          PHONE: phoneProperty,
+          TEMPLATE_NAME: {
+            Name: { en: 'Template name', ar: 'اسم القالب' },
+            Description: { en: 'Exact template name as registered in SendPulse / WhatsApp Business.', ar: 'اسم القالب كما هو مسجّل في SendPulse.' },
+            Type: 'string',
+            Required: 'Y',
+            Multiple: 'N',
+          },
+          TEMPLATE_LANGUAGE: {
+            Name: { en: 'Language code', ar: 'رمز اللغة' },
+            Description: { en: 'Template language code, e.g. en, ar. Default: en.', ar: 'رمز لغة القالب، مثل en أو ar. الافتراضي: en.' },
+            Type: 'string',
+            Required: 'N',
+            Multiple: 'N',
+            Default: 'en',
+          },
+          TEMPLATE_PARAMS: {
+            Name: { en: 'Body parameters (comma-separated)', ar: 'معاملات النص (مفصولة بفواصل)' },
+            Description: { en: 'Values for {{1}}, {{2}}, … placeholders, comma-separated. Supports Bitrix24 variables.', ar: 'قيم المتغيرات {{1}}, {{2}}, … مفصولة بفواصل.' },
+            Type: 'string',
+            Required: 'N',
+            Multiple: 'N',
+          },
+          BOT_ID: botIdProperty,
+        },
+      })
+      console.log('[installer] bizproc robot registered: noqtachat_send_wa_template')
     }
 
     // ── SETTING_CONNECTOR / CONTACT_CENTER: activate connector for a line ────
